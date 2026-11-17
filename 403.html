@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Not allowed{% endblock %}
+{% block content %}
+<h1>403 · not allowed</h1>
+<p>You are signed in, but this record or page is not yours to open.</p>
+<p><a href="{{ url_for('access.timetable') }}">Back to the timetable</a></p>
+{% endblock %}

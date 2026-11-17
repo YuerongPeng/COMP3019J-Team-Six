@@ -1,6 +1,6 @@
-Flask
-Flask-SQLAlchemy
-Flask-Login
-Flask-WTF
-PyMySQL
-Werkzeug
+Flask>=3.0
+Flask-SQLAlchemy>=3.1
+Flask-Login>=0.6
+Werkzeug>=3.0
+# Only needed when DATABASE_URL points at MySQL:
+# PyMySQL>=1.1
