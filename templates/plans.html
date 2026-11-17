@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Plans{% endblock %}
+{% block content %}
+<h1>Membership plans</h1>
+<table>
+  <thead><tr><th>Plan</th><th>Duration</th><th>Credits</th><th>Off-peak</th></tr></thead>
+  <tbody>
+  {% for p in plans %}
+    <tr><td>{{ p.name }}</td><td>{{ p.duration_days }} days</td>
+        <td>{{ p.credit_limit if p.credit_limit is not none else "unlimited" }}</td>
+        <td>{{ "yes" if p.off_peak else "no" }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<h2>Open memberships</h2>
+<table>
+  <thead><tr><th>Member</th><th>Plan</th><th>Valid to</th><th>Credits</th></tr></thead>
+  <tbody>
+  {% for m in memberships %}
+    <tr><td>{{ m.user.name }}</td><td>{{ m.plan.name }}</td><td>{{ m.end }}</td>
+        <td>{{ m.credits_remaining if m.credits_remaining is not none else "unlimited" }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

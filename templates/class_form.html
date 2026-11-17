@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit class" if session else "New class" }}{% endblock %}
+{% block content %}
+<h1>{{ "Edit class" if session else "New class" }}</h1>
+<form method="post" class="narrow">
+  {% if session %}
+  <input type="hidden" name="base_class_type_id" value="{{ session.class_type_id }}">
+  <input type="hidden" name="base_instructor_id" value="{{ session.instructor_id }}">
+  <input type="hidden" name="base_room_id" value="{{ session.room_id }}">
+  <input type="hidden" name="base_start" value="{{ session.start.strftime('%Y-%m-%dT%H:%M') }}">
+  <input type="hidden" name="base_end" value="{{ session.end.strftime('%Y-%m-%dT%H:%M') }}">
+  <input type="hidden" name="base_capacity" value="{{ session.capacity }}">
+  {% endif %}
+  <label for="class_type_id">Class type</label>
+  <select id="class_type_id" name="class_type_id">
+    {% for t in types %}<option value="{{ t.id }}" {{ 'selected' if session and session.class_type_id == t.id }}>{{ t.name }}</option>{% endfor %}
+  </select>
+  <label for="instructor_id">Instructor</label>
+  <select id="instructor_id" name="instructor_id">
+    {% for i in instructors %}<option value="{{ i.id }}" {{ 'selected' if session and session.instructor_id == i.id }}>{{ i.name }}</option>{% endfor %}
+  </select>
+  <label for="room_id">Room</label>
+  <select id="room_id" name="room_id">
+    {% for r in rooms %}<option value="{{ r.id }}" {{ 'selected' if session and session.room_id == r.id }}>{{ r.name }} ({{ r.capacity }})</option>{% endfor %}
+  </select>
+  <label for="start">Start</label>
+  <input id="start" name="start" type="datetime-local"
+         value="{{ session.start.strftime('%Y-%m-%dT%H:%M') if session else '' }}" required>
+  <label for="end">End</label>
+  <input id="end" name="end" type="datetime-local"
+         value="{{ session.end.strftime('%Y-%m-%dT%H:%M') if session else '' }}" required>
+  <label for="capacity">Capacity</label>
+  <input id="capacity" name="capacity" type="number" min="1"
+         value="{{ session.capacity if session else 14 }}" required>
+  <button>{{ "Save changes" if session else "Create class" }}</button>
+</form>
+{% if session %}
+<p class="hint">Saving keeps this class id, so existing bookings stay attached. If another staff member has already saved this class, this save is refused and the form shows the current class.</p>
+{% endif %}
+{% endblock %}
