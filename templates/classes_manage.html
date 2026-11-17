@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Manage classes{% endblock %}
+{% block content %}
+<div class="manage-head">
+  <h1>Manage classes</h1>
+  <a class="btn" href="{{ url_for('scheduling.class_new') }}">New class</a>
+</div>
+<div class="card">
+  <table>
+    <thead>
+      <tr><th>When</th><th>Class</th><th>Instructor</th><th>Room</th><th>Places</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for s in sessions %}
+      <tr>
+        <td>{{ s.start.strftime("%a %d %b, %H:%M") }}</td>
+        <td><a href="{{ url_for('access.class_detail', session_id=s.id) }}">{{ s.class_type.name }}</a></td>
+        <td>{{ s.instructor.name }}</td>
+        <td>{{ s.room.name }}</td>
+        <td><span class="chip{{ ' full' if s.places_left == 0 }}">{{ s.places_left }} / {{ s.capacity }}</span></td>
+        <td class="actions">
+          <a class="btn ghost" href="{{ url_for('scheduling.class_edit', session_id=s.id) }}">Edit</a>
+          <a class="btn ghost" href="{{ url_for('scheduling.roster', session_id=s.id) }}">Roster</a>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="hint">No classes yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

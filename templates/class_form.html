@@ -29,12 +29,39 @@
   <label for="end">End</label>
   <input id="end" name="end" type="datetime-local"
          value="{{ session.end.strftime('%Y-%m-%dT%H:%M') if session else '' }}" required>
-  <label for="capacity">Capacity</label>
+  <label for="capacity">Capacity{% if session %} · {{ booked }} booked{% endif %}</label>
   <input id="capacity" name="capacity" type="number" min="1"
-         value="{{ session.capacity if session else 14 }}" required>
+         value="{{ session.capacity if session else 14 }}" required
+         {% if session %}data-booked="{{ booked }}"{% endif %}>
+  {% if session %}
+  <p id="capacity-warning" class="warn" hidden></p>
+  {% endif %}
   <button>{{ "Save changes" if session else "Create class" }}</button>
 </form>
 {% if session %}
 <p class="hint">Saving keeps this class id, so existing bookings stay attached. If another staff member has already saved this class, this save is refused and the form shows the current class.</p>
+<script>
+(function () {
+  var input = document.getElementById('capacity');
+  var warn = document.getElementById('capacity-warning');
+  var booked = parseInt(input.dataset.booked, 10);
+  function check() {
+    var v = parseInt(input.value, 10);
+    if (isNaN(v)) { warn.hidden = true; return; }
+    if (v < booked) {
+      warn.hidden = false;
+      warn.textContent = 'Warning: this is below the ' + booked +
+        ' member(s) already booked. The save will be refused.';
+    } else if (v === booked) {
+      warn.hidden = false;
+      warn.textContent = 'This equals the number already booked — no places left for anyone else.';
+    } else {
+      warn.hidden = true;
+    }
+  }
+  input.addEventListener('input', check);
+  check();
+})();
+</script>
 {% endif %}
 {% endblock %}

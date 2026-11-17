@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, abort, flash, redirect, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, text
+from sqlalchemy.exc import OperationalError
 
 from . import db
 from .access import RuleError, active_membership
@@ -68,6 +69,10 @@ def book(session_id):
         db.session.rollback()
         flash(str(exc))
         return redirect(url_for("access.class_detail", session_id=session_id), code=303)
+    except OperationalError:
+        db.session.rollback()
+        flash("The system is busy. Please try again.")
+        return redirect(url_for("access.class_detail", session_id=session_id), code=303)
     return redirect(url_for("access.timetable"), code=303)
 
 
@@ -90,6 +95,11 @@ def cancel(booking_id):
     membership = db.session.get(Membership, booking.membership_id)
     if membership is not None and membership.credits_remaining is not None:
         membership.credits_remaining += 1
-    db.session.commit()
+    try:
+        db.session.commit()
+    except OperationalError:
+        db.session.rollback()
+        flash("The system is busy. Please try again.")
+        return redirect(url_for("access.my_bookings"), code=303)
     flash("Cancelled. The place is free again.")
     return redirect(url_for("access.my_bookings"), code=303)

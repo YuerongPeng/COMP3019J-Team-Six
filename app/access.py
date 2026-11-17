@@ -64,7 +64,11 @@ def timetable():
 @bp.get("/classes/<int:session_id>")
 def class_detail(session_id):
     class_row = db.get_or_404(ClassSession, session_id)
-    return render_template("class_detail.html", session=class_row)
+    booked = False
+    if current_user.is_authenticated:
+        booked = any(b.class_session_id == session_id and b.status == "Booked"
+                     for b in current_user.bookings)
+    return render_template("class_detail.html", session=class_row, booked=booked)
 
 
 @bp.route("/login", methods=["GET", "POST"])
@@ -93,6 +97,8 @@ def logout():
 @bp.get("/my-bookings")
 @login_required
 def my_bookings():
+    if current_user.role == "staff":
+        abort(403)
     bookings = (Booking.query
                 .filter_by(user_id=current_user.id)
                 .order_by(Booking.booked_at.desc())

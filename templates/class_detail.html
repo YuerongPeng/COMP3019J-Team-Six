@@ -5,8 +5,19 @@
 <p>{{ session.start.strftime("%A %d %B, %H:%M") }} · {{ session.end.strftime("%H:%M") }}</p>
 <p>Instructor {{ session.instructor.name }} · {{ session.room.name }} · capacity {{ session.capacity }}</p>
 <p><strong>{{ session.places_left }}</strong> places left.</p>
-{% if current_user.is_authenticated and current_user.role == 'member' and session.places_left > 0 %}
-  <form method="post" action="{{ url_for('booking.book', session_id=session.id) }}"><button>Book this class</button></form>
+{% if current_user.is_authenticated and current_user.role == 'member' %}
+  {% if booked %}
+    <span class="tag">you are booked</span>
+  {% elif session.places_left > 0 %}
+    <form method="post" action="{{ url_for('booking.book', session_id=session.id) }}"><button>Book this class</button></form>
+  {% else %}
+    <span class="tag full">full</span>
+  {% endif %}
+{% elif current_user.is_authenticated and current_user.role == 'staff' %}
+  <p class="hint">
+    <a href="{{ url_for('scheduling.class_edit', session_id=session.id) }}">Edit</a> ·
+    <a href="{{ url_for('scheduling.roster', session_id=session.id) }}">Roster</a>
+  </p>
 {% elif not current_user.is_authenticated %}
   <a href="{{ url_for('access.login') }}">Sign in to book</a>
 {% endif %}

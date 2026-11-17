@@ -12,10 +12,11 @@
   <nav>
     <a href="{{ url_for('access.timetable') }}">Timetable</a>
     {% if current_user.is_authenticated %}
-      <a href="{{ url_for('access.my_bookings') }}">My bookings</a>
       {% if current_user.role == 'staff' %}
-        <a href="{{ url_for('scheduling.class_new') }}">New class</a>
+        <a href="{{ url_for('scheduling.class_list') }}">Manage classes</a>
         <a href="{{ url_for('scheduling.plans') }}">Plans</a>
+      {% else %}
+        <a href="{{ url_for('access.my_bookings') }}">My bookings</a>
       {% endif %}
       <span class="who">{{ current_user.name }}</span>
       <form method="post" action="{{ url_for('access.logout') }}"><button>Sign out</button></form>

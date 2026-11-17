@@ -24,6 +24,9 @@
 
 body {
   margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   background: var(--bg);
   color: var(--ink);
   font: 400 16px/1.55 Inter, "Segoe UI", system-ui, sans-serif;
@@ -69,7 +72,7 @@ nav form { display: inline; margin: 0; }
 .who { color: var(--muted); font-size: 14px; }
 
 /* layout */
-main { max-width: 1040px; margin: 0 auto; padding: 0 32px 96px; }
+main { max-width: 1040px; width: 100%; margin: 0 auto; padding: 0 32px 96px; flex: 1; }
 
 .hero {
   padding: 64px 0 40px;
@@ -98,6 +101,16 @@ h1 { font-size: clamp(28px, 3.4vw, 38px); margin: 40px 0 10px; }
 h2 { font-size: 20px; margin: 36px 0 8px; }
 
 .hint { color: var(--muted); font-size: 13px; }
+
+.warn {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: #FDE8E8;
+  color: #B3261E;
+  font-size: 13px;
+  font-weight: 500;
+}
 
 /* table card */
 .card {
@@ -147,6 +160,8 @@ td a:hover { background: var(--accent); }
 .chip.full { background: #F1F1F1; color: var(--muted); }
 .tag { font-size: 12px; color: var(--muted); }
 .tag.full { color: var(--muted); }
+.tag a { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--accent); }
+.tag a:hover { background: var(--accent); }
 
 /* buttons */
 button, .btn {
@@ -218,6 +233,26 @@ input:focus, select:focus, textarea:focus {
   font-size: 14px;
   font-weight: 500;
 }
+
+/* manage classes page */
+.manage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 40px;
+}
+.manage-head h1 { margin: 0; }
+.actions { white-space: nowrap; }
+.actions .btn { margin: 0 4px; }
+.btn.ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  text-decoration: none;
+  padding: 7px 14px;
+}
+.btn.ghost:hover { background: #F4F4F4; }
 
 /* footer */
 .foot {
