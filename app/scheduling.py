@@ -8,6 +8,7 @@ from datetime import datetime
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from . import db
 from .access import RuleError, staff_only
@@ -46,7 +47,31 @@ def validate_class(class_row, existing=False):
     if existing:
         taken = booked_count(class_row.id)
         if class_row.capacity < taken:
-            raise RuleError("Capacity cannot fall below the %d booked places." % taken)
+            raise RuleError(
+                "That capacity is below the %d members already booked. "
+                "Remove bookings first, or cancel the class." % taken)
+        # A change to the time, instructor or room must not leave a member in two
+        # classes at once, and must not overload an instructor or a room.
+        clashing = members_double_booked(class_row)
+        if clashing:
+            raise RuleError(
+                "That time would put %d booked member(s) in two classes at once. "
+                "Nothing was written." % clashing)
+
+
+def members_double_booked(class_row):
+    """How many members already booked here would clash with another booking."""
+    affected = set()
+    for booking in class_row.bookings:
+        if booking.status != "Booked":
+            continue
+        for other in booking.user.bookings:
+            if other.status != "Booked" or other.class_session_id == class_row.id:
+                continue
+            if other.session.start < class_row.end and class_row.start < other.session.end:
+                affected.add(booking.user_id)
+                break
+    return len(affected)
 
 
 def _opened_stamp(class_row):
@@ -84,6 +109,15 @@ def _apply_class_form(class_row, form):
     class_row.capacity = int(form["capacity"])
 
 
+@bp.get("/admin/classes")
+@staff_only
+def class_list():
+    sessions = (ClassSession.query
+                .order_by(ClassSession.start)
+                .all())
+    return render_template("classes_manage.html", sessions=sessions)
+
+
 @bp.route("/admin/classes/new", methods=["GET", "POST"])
 @staff_only
 def class_new():
@@ -105,6 +139,9 @@ def class_new():
         except (RuleError, ValueError) as exc:
             db.session.rollback()
             flash(str(exc))
+        except OperationalError:
+            db.session.rollback()
+            flash("The system is busy. Please try again.")
     return render_template("class_form.html", session=None,
                            types=ClassType.query.all(),
                            instructors=Instructor.query.all(),
@@ -138,10 +175,15 @@ def class_edit(session_id):
             db.session.rollback()
             flash(str(exc))
             class_row = db.session.get(ClassSession, session_id)
+        except OperationalError:
+            db.session.rollback()
+            flash("The system is busy. Please try again.")
+            class_row = db.session.get(ClassSession, session_id)
     return render_template("class_form.html", session=class_row,
                            types=ClassType.query.all(),
                            instructors=Instructor.query.all(),
-                           rooms=Room.query.all())
+                           rooms=Room.query.all(),
+                           booked=booked_count(class_row.id) if class_row else 0)
 
 
 @bp.get("/admin/classes/<int:session_id>/roster")

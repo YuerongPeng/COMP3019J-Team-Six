@@ -139,7 +139,8 @@ check("roster 200", r.status_code == 200, str(r.status_code))
 # capacity below the number already booked must be refused
 r = client.post("/admin/classes/%d/edit" % target_id,
                 data=edit_payload(target_id, capacity="2"), follow_redirects=True)
-check("capacity below booked refused", "cannot fall below" in r.get_data(as_text=True).lower(),
+check("capacity below booked refused", "below the" in r.get_data(as_text=True).lower()
+      and "already booked" in r.get_data(as_text=True).lower(),
       "no refusal text")
 
 # moving a class onto a time a booked member already occupies must be refused
