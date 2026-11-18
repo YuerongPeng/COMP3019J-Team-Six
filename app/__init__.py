@@ -11,9 +11,28 @@ import os
 from flask import Flask, render_template
 from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import inspect, text
 
 db = SQLAlchemy()
 login_manager = LoginManager()
+
+
+def _ensure_late_change_column(app):
+    """Add the cancel exception to a database created before this column."""
+    with app.app_context():
+        try:
+            insp = inspect(db.engine)
+        except Exception:
+            return
+        if not insp.has_table("booking"):
+            return
+        names = {col["name"] for col in insp.get_columns("booking")}
+        if "late_change_cancel" in names:
+            return
+        db.session.execute(text(
+            "ALTER TABLE booking ADD COLUMN late_change_cancel BOOLEAN NOT NULL DEFAULT 0"
+        ))
+        db.session.commit()
 
 
 def create_app(config_object="config.Config"):
@@ -25,6 +44,7 @@ def create_app(config_object="config.Config"):
     os.makedirs(app.instance_path, exist_ok=True)
 
     db.init_app(app)
+    _ensure_late_change_column(app)
     login_manager.init_app(app)
     login_manager.login_view = "access.login"
     login_manager.login_message = "Please sign in to continue."

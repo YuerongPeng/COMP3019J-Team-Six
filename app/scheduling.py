@@ -4,7 +4,7 @@
 Checks instructor experience, room suitability, overlaps and capacity when a class is
 saved, and updates a class without changing its identity, so existing bookings stay.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from sqlalchemy import text
@@ -109,6 +109,24 @@ def _apply_class_form(class_row, form):
     class_row.capacity = int(form["capacity"])
 
 
+def _keep_cancel_open(class_row, previous_start):
+    """If the new start is inside the cut-off, booked members may still cancel.
+
+    Returns how many bookings were given that chance. A start that stays at
+    least two hours away clears the exception, because the normal rule applies.
+    """
+    if class_row.start == previous_start:
+        return 0
+    booked = [b for b in class_row.bookings if b.status == "Booked"]
+    if class_row.start - datetime.now() >= timedelta(hours=2):
+        for booking in booked:
+            booking.late_change_cancel = False
+        return 0
+    for booking in booked:
+        booking.late_change_cancel = True
+    return len(booked)
+
+
 @bp.get("/admin/classes")
 @staff_only
 def class_list():
@@ -166,10 +184,18 @@ def class_edit(session_id):
                     "Another staff member saved this class while this form was open. "
                     "Nothing was written. The form now shows the current class."
                 )
+            previous_start = class_row.start
             _apply_class_form(class_row, request.form)
             validate_class(class_row, existing=True)
+            opened = _keep_cancel_open(class_row, previous_start)
             db.session.commit()
             flash("Class updated on the same id.")
+            if opened:
+                flash(
+                    "%d booked member(s) can still cancel. The new start is inside "
+                    "the two-hour cut-off, so the usual refusal does not apply to them."
+                    % opened
+                )
             return redirect(url_for("scheduling.roster", session_id=class_row.id), code=303)
         except (RuleError, ValueError) as exc:
             db.session.rollback()

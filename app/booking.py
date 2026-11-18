@@ -85,12 +85,14 @@ def cancel(booking_id):
     if booking.status != "Booked":
         flash("That booking is already cancelled.")
         return redirect(url_for("access.my_bookings"), code=303)
-    if booking.session.start - datetime.now() < timedelta(hours=2):
+    inside_cutoff = booking.session.start - datetime.now() < timedelta(hours=2)
+    if inside_cutoff and not booking.late_change_cancel:
         flash("Too late to cancel: the cut-off is two hours before the start.")
         return redirect(url_for("access.my_bookings"), code=303)
 
     booking.status = "Cancelled"
     booking.active = False
+    booking.late_change_cancel = False
     booking.cancelled_at = datetime.utcnow()
     membership = db.session.get(Membership, booking.membership_id)
     if membership is not None and membership.credits_remaining is not None:
