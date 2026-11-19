@@ -2,10 +2,12 @@
 {% block title %}My bookings{% endblock %}
 {% block content %}
 <h1>My bookings</h1>
+
+<h2>Upcoming</h2>
 <table>
   <thead><tr><th>Class</th><th>When</th><th>Instructor</th><th>Status</th><th></th></tr></thead>
   <tbody>
-  {% for b in bookings %}
+  {% for b in upcoming %}
     <tr>
       <td>{{ b.session.class_type.name }}</td>
       <td>{{ b.session.start.strftime("%a %d %b, %H:%M") }}</td>
@@ -21,7 +23,25 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="5" class="hint">You have no bookings yet.</td></tr>
+    <tr><td colspan="5" class="hint">No upcoming bookings.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>Past</h2>
+<table>
+  <thead><tr><th>Class</th><th>When</th><th>Instructor</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for b in past %}
+    <tr>
+      <td>{{ b.session.class_type.name }}</td>
+      <td>{{ b.session.start.strftime("%a %d %b, %H:%M") }}</td>
+      <td>{{ b.session.instructor.name }}</td>
+      <td>{{ b.status }}</td>
+      <td></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="hint">No past bookings.</td></tr>
   {% endfor %}
   </tbody>
 </table>
