@@ -136,6 +136,47 @@ h2 { font-size: 20px; margin: 36px 0 8px; }
 .filters .check input { width: auto; }
 .filters .btn { margin-bottom: 2px; }
 
+.choice { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+button.blocked {
+  background: #F1F1F1;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+button.blocked:hover { background: #F1F1F1; }
+button.bang {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  background: #B3261E;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+button.bang:hover,
+button.bang:focus { background: #B3261E; }
+.bang-note {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 5;
+  width: max-content;
+  max-width: 260px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+}
+button.bang:hover .bang-note,
+button.bang:focus .bang-note { display: block; }
+
 /* table card */
 .card {
   background: var(--card);

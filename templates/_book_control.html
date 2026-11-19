@@ -1,0 +1,12 @@
+{% if block %}
+<span class="choice">
+  <button type="button" class="blocked" disabled>{{ block.label }}</button>
+  {% if block.detail %}
+  <button type="button" class="bang" aria-label="{{ block.detail }}">!
+    <span class="bang-note">{{ block.detail }}</span>
+  </button>
+  {% endif %}
+</span>
+{% else %}
+<form method="post" action="{{ url_for('booking.book', session_id=session_id) }}"><button>Book</button></form>
+{% endif %}

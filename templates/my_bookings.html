@@ -14,11 +14,20 @@
       <td>{{ b.session.instructor.name }}</td>
       <td>{{ b.status }}</td>
       <td>
-        {% if b.status == 'Booked' %}
-        {% if b.late_change_cancel %}
-        <p class="hint">The start time was moved inside the two-hour cut-off. You can still cancel, and a credit is returned if your plan uses one.</p>
-        {% endif %}
-        <form method="post" action="{{ url_for('booking.cancel', booking_id=b.id) }}"><button>Cancel</button></form>
+        {% if cancel_states.get(b.id) %}
+        {% set state = cancel_states[b.id] %}
+        <span class="choice">
+          {% if state.disabled %}
+          <button type="button" class="blocked" disabled>Cancel</button>
+          {% else %}
+          <form method="post" action="{{ url_for('booking.cancel', booking_id=b.id) }}"><button>Cancel</button></form>
+          {% endif %}
+          {% if state.detail %}
+          <button type="button" class="bang" aria-label="{{ state.detail }}">!
+            <span class="bang-note">{{ state.detail }}</span>
+          </button>
+          {% endif %}
+        </span>
         {% endif %}
       </td>
     </tr>

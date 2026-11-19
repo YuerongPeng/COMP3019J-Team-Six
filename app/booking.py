@@ -25,6 +25,72 @@ def booked_count(session_id):
             .scalar())
 
 
+def plan_notice(user):
+    """One timetable line when the member's plan has already ended."""
+    if not user.is_authenticated or user.role != "member":
+        return None
+    membership = active_membership(user.id)
+    if membership is None:
+        return "You do not have an active plan."
+    if membership.end < datetime.now().date():
+        return "Your %s ended on %s." % (
+            membership.plan.name, membership.end.strftime("%d %b %Y"))
+    return None
+
+
+def book_block(user, class_row):
+    """Why this member cannot book, or None when the Book button may be used.
+
+    The order is the one shown on the button. Several reasons may be true;
+    only the first is returned. Submitting the form still runs the real checks.
+    """
+    if not user.is_authenticated or user.role != "member":
+        return None
+    booked = [b for b in user.bookings if b.status == "Booked"]
+    if any(b.class_session_id == class_row.id for b in booked):
+        return {"label": "Booked", "detail": ""}
+    membership = active_membership(user.id)
+    if membership is None or membership.end < class_row.start.date():
+        return {"label": "Plan expired", "detail": ""}
+    if membership.credits_remaining is not None and membership.credits_remaining <= 0:
+        return {"label": "No credits", "detail": ""}
+    if membership.plan.off_peak and class_row.start.hour >= 16:
+        return {
+            "label": "Off-peak",
+            "detail": "This plan only covers classes that start before 16:00.",
+        }
+    for other in booked:
+        if other.session.start < class_row.end and class_row.start < other.session.end:
+            return {
+                "label": "Time clash",
+                "detail": "Overlaps %s %s." % (
+                    other.session.class_type.name,
+                    other.session.start.strftime("%a %H:%M")),
+            }
+    if class_row.places_left <= 0:
+        return {"label": "Full", "detail": ""}
+    return None
+
+
+def cancel_block(booking, now=None):
+    """How the Cancel button should look for one upcoming booking."""
+    if booking.status != "Booked":
+        return None
+    now = now or datetime.now()
+    inside = booking.session.start - now < timedelta(hours=2)
+    if not inside:
+        return {"disabled": False, "detail": ""}
+    if booking.late_change_cancel:
+        return {
+            "disabled": False,
+            "detail": "The start time was moved inside the two-hour cut-off. You can still cancel.",
+        }
+    return {
+        "disabled": True,
+        "detail": "Less than two hours before the start, so this cannot be cancelled.",
+    }
+
+
 @bp.post("/classes/<int:session_id>/book")
 @login_required
 def book(session_id):

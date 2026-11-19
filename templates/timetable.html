@@ -10,6 +10,7 @@
 </section>
 
 <div class="card reveal" id="timetable">
+  {% if plan_notice %}<p class="warn">{{ plan_notice }}</p>{% endif %}
   <form class="filters" method="get" action="{{ url_for('access.timetable') }}">
     <div>
       <label for="date">Date</label>
@@ -47,10 +48,9 @@
         <td><span class="chip{{ ' full' if s.places_left == 0 }}">{{ s.places_left }} / {{ s.capacity }}</span></td>
         <td>
           {% if current_user.is_authenticated and current_user.role == 'member' %}
-            {% if s.id in mine %}<span class="tag">you are booked</span>
-            {% elif s.places_left > 0 %}
-              <form method="post" action="{{ url_for('booking.book', session_id=s.id) }}"><button>Book</button></form>
-            {% else %}<span class="tag full">full</span>{% endif %}
+            {% with block=blocks.get(s.id), session_id=s.id %}
+            {% include "_book_control.html" %}
+            {% endwith %}
           {% elif not current_user.is_authenticated %}
             <a href="{{ url_for('access.login') }}">Sign in to book</a>
           {% endif %}

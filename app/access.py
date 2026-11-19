@@ -67,12 +67,19 @@ def timetable():
     if open_only:
         sessions = [s for s in sessions if s.places_left > 0]
     mine = set()
-    if current_user.is_authenticated:
+    blocks = {}
+    notice = None
+    if current_user.is_authenticated and current_user.role == "member":
+        from .booking import book_block, plan_notice
+        notice = plan_notice(current_user)
         mine = {b.class_session_id for b in current_user.bookings if b.status == "Booked"}
+        blocks = {s.id: book_block(current_user, s) for s in sessions}
     return render_template(
         "timetable.html",
         sessions=sessions,
         mine=mine,
+        blocks=blocks,
+        plan_notice=notice,
         types=types,
         chosen_date=request.args.get("date", "") if chosen_date else "",
         chosen_type=chosen_type or "",
@@ -106,11 +113,11 @@ def _timetable_type(raw, types):
 @bp.get("/classes/<int:session_id>")
 def class_detail(session_id):
     class_row = db.get_or_404(ClassSession, session_id)
-    booked = False
-    if current_user.is_authenticated:
-        booked = any(b.class_session_id == session_id and b.status == "Booked"
-                     for b in current_user.bookings)
-    return render_template("class_detail.html", session=class_row, booked=booked)
+    block = None
+    if current_user.is_authenticated and current_user.role == "member":
+        from .booking import book_block
+        block = book_block(current_user, class_row)
+    return render_template("class_detail.html", session=class_row, block=block)
 
 
 @bp.route("/login", methods=["GET", "POST"])
@@ -149,4 +156,10 @@ def my_bookings():
     past = [b for b in bookings if b.session.start < now]
     upcoming.sort(key=lambda b: b.session.start)
     past.sort(key=lambda b: b.session.start, reverse=True)
-    return render_template("my_bookings.html", upcoming=upcoming, past=past)
+    from .booking import cancel_block
+    return render_template(
+        "my_bookings.html",
+        upcoming=upcoming,
+        past=past,
+        cancel_states={b.id: cancel_block(b, now) for b in upcoming},
+    )
