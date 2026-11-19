@@ -112,6 +112,30 @@ h2 { font-size: 20px; margin: 36px 0 8px; }
   font-weight: 500;
 }
 
+/* timetable filter. Same fields and buttons as the rest of the site. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  padding: 16px 8px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.filters label { display: block; margin-bottom: 6px; }
+.filters .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  text-transform: none;
+  letter-spacing: -0.02em;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.filters .check input { width: auto; }
+.filters .btn { margin-bottom: 2px; }
+
 /* table card */
 .card {
   background: var(--card);

@@ -10,6 +10,29 @@
 </section>
 
 <div class="card reveal" id="timetable">
+  <form class="filters" method="get" action="{{ url_for('access.timetable') }}">
+    <div>
+      <label for="date">Date</label>
+      <input id="date" name="date" type="date" value="{{ chosen_date }}">
+    </div>
+    <div>
+      <label for="type">Class</label>
+      <select id="type" name="type">
+        <option value="">All types</option>
+        {% for t in types %}
+        <option value="{{ t.id }}" {{ 'selected' if chosen_type == t.id }}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <label class="check" for="open">
+      <input id="open" name="open" type="checkbox" value="1" {{ 'checked' if open_only }}>
+      Only with places
+    </label>
+    <button type="submit">Filter</button>
+    {% if chosen_date or chosen_type or open_only %}
+    <a class="btn ghost" href="{{ url_for('access.timetable') }}">Show all</a>
+    {% endif %}
+  </form>
   <table>
     <thead>
       <tr><th>When</th><th>Class</th><th>Instructor</th><th>Room</th><th>Places</th><th></th></tr>
@@ -33,6 +56,8 @@
           {% endif %}
         </td>
       </tr>
+    {% else %}
+      <tr><td colspan="6" class="hint">No classes match this filter.</td></tr>
     {% endfor %}
     </tbody>
   </table>

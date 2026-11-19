@@ -4,7 +4,7 @@
 Role checks before any booking or admin action, and every rendered page built from
 the latest query - including places left and the refusal messages.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, session, url_for
@@ -12,7 +12,7 @@ from flask_login import current_user, login_required, login_user, logout_user
 from werkzeug.security import check_password_hash
 
 from . import db, login_manager
-from .models import Booking, ClassSession, Membership, User
+from .models import Booking, ClassSession, ClassType, Membership, User
 
 bp = Blueprint("access", __name__)
 
@@ -55,10 +55,52 @@ def timetable():
                 .filter(ClassSession.start >= datetime.now())
                 .order_by(ClassSession.start)
                 .all())
+    types = ClassType.query.order_by(ClassType.name).all()
+    chosen_date = _timetable_date(request.args.get("date", ""))
+    chosen_type = _timetable_type(request.args.get("type", ""), types)
+    open_only = request.args.get("open") == "1"
+    if chosen_date is not None:
+        day_end = chosen_date + timedelta(days=1)
+        sessions = [s for s in sessions if chosen_date <= s.start < day_end]
+    if chosen_type is not None:
+        sessions = [s for s in sessions if s.class_type_id == chosen_type]
+    if open_only:
+        sessions = [s for s in sessions if s.places_left > 0]
     mine = set()
     if current_user.is_authenticated:
         mine = {b.class_session_id for b in current_user.bookings if b.status == "Booked"}
-    return render_template("timetable.html", sessions=sessions, mine=mine)
+    return render_template(
+        "timetable.html",
+        sessions=sessions,
+        mine=mine,
+        types=types,
+        chosen_date=request.args.get("date", "") if chosen_date else "",
+        chosen_type=chosen_type or "",
+        open_only=open_only,
+    )
+
+
+def _timetable_date(raw):
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _timetable_type(raw, types):
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        type_id = int(raw)
+    except ValueError:
+        return None
+    if any(t.id == type_id for t in types):
+        return type_id
+    return None
 
 
 @bp.get("/classes/<int:session_id>")
