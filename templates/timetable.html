@@ -9,6 +9,13 @@
   </div>
 </section>
 
+{% if current_user.is_authenticated and current_user.role == 'member' and plan_expired %}
+<div class="warn note">
+  你的方案已到期，不能预订新课程。请到
+  <a href="{{ url_for('membership.account') }}">我的方案</a> 续订或更换方案。
+</div>
+{% endif %}
+
 <div class="card reveal" id="timetable">
   <table>
     <thead>
@@ -24,10 +31,14 @@
         <td><span class="chip{{ ' full' if s.places_left == 0 }}">{{ s.places_left }} / {{ s.capacity }}</span></td>
         <td>
           {% if current_user.is_authenticated and current_user.role == 'member' %}
-            {% if s.id in mine %}<span class="tag">you are booked</span>
-            {% elif s.places_left > 0 %}
+            {% if s.id in refusals %}
+              {% set msg, detail = refusals[s.id] %}
+              <button class="disabled" data-tip="{{ detail }}" disabled>{{ msg }}</button>
+            {% elif s.id in mine %}
+              <span class="tag">you are booked</span>
+            {% else %}
               <form method="post" action="{{ url_for('booking.book', session_id=s.id) }}"><button>Book</button></form>
-            {% else %}<span class="tag full">full</span>{% endif %}
+            {% endif %}
           {% elif not current_user.is_authenticated %}
             <a href="{{ url_for('access.login') }}">Sign in to book</a>
           {% endif %}

@@ -22,3 +22,15 @@
 
   items.forEach(function (el) { io.observe(el); });
 })();
+
+// Tap a disabled button on a touch device to see its tooltip reason.
+// (Disabled buttons swallow clicks, so listen for touch/click on the parent.)
+(function () {
+  "use strict";
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest && e.target.closest("button.disabled");
+    if (!btn) { return; }
+    btn.classList.toggle("tapped");
+    setTimeout(function () { btn.classList.remove("tapped"); }, 2500);
+  });
+})();

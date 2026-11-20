@@ -12,6 +12,7 @@ from flask_login import current_user, login_required, login_user, logout_user
 from werkzeug.security import check_password_hash
 
 from . import db, login_manager
+from .membership import book_refusal, can_cancel
 from .models import Booking, ClassSession, Membership, User
 
 bp = Blueprint("access", __name__)
@@ -56,19 +57,31 @@ def timetable():
                 .order_by(ClassSession.start)
                 .all())
     mine = set()
-    if current_user.is_authenticated:
+    refusals = {}
+    plan_expired = False
+    if current_user.is_authenticated and current_user.role == "member":
         mine = {b.class_session_id for b in current_user.bookings if b.status == "Booked"}
-    return render_template("timetable.html", sessions=sessions, mine=mine)
+        for s in sessions:
+            refusal = book_refusal(s, current_user)
+            if refusal:
+                refusals[s.id] = refusal
+        membership = active_membership(current_user.id)
+        plan_expired = (membership is not None and membership.end < datetime.now().date())
+    return render_template("timetable.html", sessions=sessions, mine=mine,
+                           refusals=refusals, plan_expired=plan_expired)
 
 
 @bp.get("/classes/<int:session_id>")
 def class_detail(session_id):
     class_row = db.get_or_404(ClassSession, session_id)
     booked = False
-    if current_user.is_authenticated:
+    refusal = None
+    if current_user.is_authenticated and current_user.role == "member":
         booked = any(b.class_session_id == session_id and b.status == "Booked"
                      for b in current_user.bookings)
-    return render_template("class_detail.html", session=class_row, booked=booked)
+        refusal = book_refusal(class_row, current_user)
+    return render_template("class_detail.html", session=class_row, booked=booked,
+                           refusal=refusal)
 
 
 @bp.route("/login", methods=["GET", "POST"])
@@ -103,4 +116,10 @@ def my_bookings():
                 .filter_by(user_id=current_user.id)
                 .order_by(Booking.booked_at.desc())
                 .all())
-    return render_template("my_bookings.html", bookings=bookings)
+    upcoming = [b for b in bookings
+                if b.status == "Booked" and b.session.start >= datetime.now()]
+    past = [b for b in bookings
+            if b.status != "Booked" or b.session.start < datetime.now()]
+    cancelled = [(b, can_cancel(b)) for b in bookings if b.status == "Booked"]
+    return render_template("my_bookings.html", upcoming=upcoming, past=past,
+                           cancellable=dict(cancelled))

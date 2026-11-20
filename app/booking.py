@@ -13,6 +13,7 @@ from sqlalchemy.exc import OperationalError
 
 from . import db
 from .access import RuleError, active_membership
+from .membership import book_refusal, membership_covering
 from .models import Booking, ClassSession, Membership
 
 bp = Blueprint("booking", __name__)
@@ -38,24 +39,16 @@ def book(session_id):
         if class_row is None:
             raise RuleError("That class no longer exists.")
 
+        # The same rules the calendar shows, re-checked at submit time.
+        refusal = book_refusal(class_row, current_user)
+        if refusal:
+            raise RuleError("Cannot book: " + refusal[1])
+
         membership = active_membership(current_user.id)
-        if membership is None or membership.end < class_row.start.date():
+        if membership is None:
+            raise RuleError("No active membership.")
+        if not membership_covering(membership, class_row.start):
             raise RuleError("No active membership covers that date.")
-        if membership.plan.off_peak and class_row.start.hour >= 16:
-            raise RuleError("This plan covers off-peak classes only.")
-        if membership.credits_remaining is not None and membership.credits_remaining <= 0:
-            raise RuleError("No credits left on this plan.")
-        if booked_count(session_id) >= class_row.capacity:
-            raise RuleError("That class is full.")
-        if Booking.query.filter_by(user_id=current_user.id,
-                                   class_session_id=session_id,
-                                   status="Booked").first():
-            raise RuleError("You already have this class booked.")
-        for other in current_user.bookings:
-            if other.status != "Booked":
-                continue
-            if other.session.start < class_row.end and class_row.start < other.session.end:
-                raise RuleError("That overlaps another class you booked.")
 
         db.session.add(Booking(user_id=current_user.id,
                                class_session_id=session_id,

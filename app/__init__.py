@@ -29,9 +29,10 @@ def create_app(config_object="config.Config"):
     login_manager.login_view = "access.login"
     login_manager.login_message = "Please sign in to continue."
 
-    from . import access, booking, scheduling
+    from . import access, booking, membership, scheduling
     app.register_blueprint(access.bp)
     app.register_blueprint(booking.bp)
+    app.register_blueprint(membership.bp)
     app.register_blueprint(scheduling.bp)
 
     @app.errorhandler(403)

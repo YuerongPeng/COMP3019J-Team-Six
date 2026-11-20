@@ -65,6 +65,11 @@ templates/ static/     the pages and the theme
 | GET | `/timetable` | all | classes with places left |
 | GET | `/classes/<id>` | all | one class, or 404 |
 | GET, POST | `/login` | visitor | sign in |
+| GET, POST | `/register` | visitor | create an account |
+| GET, POST | `/account/password` | signed in | change own password |
+| GET | `/account` | member | own plan, renew / switch |
+| POST | `/account/renew` | member | extend current plan in place |
+| POST | `/account/switch` | member | change to another plan |
 | POST | `/logout` | signed in | clear the session |
 | GET | `/my-bookings` | member | own bookings only |
 | POST | `/classes/<id>/book` | member | lock, count, insert |
@@ -88,6 +93,15 @@ templates/ static/     the pages and the theme
 6. **Edits cannot double-book a member** - a class edit may change the time, the
    instructor, the room or the capacity, but it is refused when a member already
    booked on that class would end up in two classes at once.
+
+7. **Account and membership** - a member registers their own account, changes their
+   own password, renews the current plan in place (end extends from the current end,
+   credits refill to the limit, no second card) or switches to another plan (the old
+   card is marked "replaced", a new card starts today with the new plan's allowance,
+   and bookings already made stay attached to the old card). The timetable and the
+   class page show a disabled button with a single reason when a booking is refused,
+   in this order: already booked, plan expired, no credits, off-peak window, time
+   conflict, full. The server re-checks the same rules on submit.
 
 ## Tests
 

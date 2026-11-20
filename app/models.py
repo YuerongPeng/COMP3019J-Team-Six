@@ -4,7 +4,7 @@
 User, Membership plan, Membership, Instructor, Instructor skill, Room,
 Class type, Class session, Booking.
 """
-from datetime import datetime
+from datetime import date, datetime
 
 from flask_login import UserMixin
 
@@ -36,6 +36,30 @@ class MembershipPlan(db.Model):
     off_peak = db.Column(db.Boolean, nullable=False, default=False)
 
 
+class PlanChange(db.Model):
+    """One membership card life-cycle event.
+
+    Every card starts here (op kind). Renewing keeps the same card and extends
+    ``end``; the change row records what was extended and how the credits moved.
+    Switching plans closes the old card (status "replaced") and opens a new card
+    (op "switch"); the old and new cards are linked through ``linked_id`` so a
+    member's history reads as one story.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    membership_id = db.Column(db.Integer, db.ForeignKey("membership.id"), nullable=False)
+    kind = db.Column(db.String(12), nullable=False)      # open | renew | switch
+    plan_id = db.Column(db.Integer, db.ForeignKey("membership_plan.id"), nullable=False)
+    prior_end = db.Column(db.Date)
+    new_end = db.Column(db.Date)
+    prior_credits = db.Column(db.Integer)
+    new_credits = db.Column(db.Integer)
+    linked_id = db.Column(db.Integer, db.ForeignKey("membership.id"))  # switch: the other card
+    at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    membership = db.relationship("Membership", foreign_keys=[membership_id])
+    plan = db.relationship("MembershipPlan")
+
+
 class Membership(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
@@ -47,6 +71,18 @@ class Membership(db.Model):
 
     user = db.relationship("User", back_populates="memberships")
     plan = db.relationship("MembershipPlan")
+
+    @property
+    def plan_name(self):
+        return self.plan.name if self.plan else ""
+
+    @property
+    def is_expired(self):
+        return self.end < date.today()
+
+    @property
+    def credits_exhausted(self):
+        return self.credits_remaining is not None and self.credits_remaining <= 0
 
 
 class Instructor(db.Model):

@@ -96,3 +96,70 @@
 | alex@example.com | member，月卡 unlimited |
 | mei@example.com | member，十次卡 |
 | staff@example.com | staff |
+
+---
+
+## 七、账号与方案（全新功能，需求 1-5）
+
+> 分支 `account-and-membership`。对应测试 `tests/account_membership_test.py`
+> （23 项）。需求 6-16 由其他成员在同一 iteration 处理，本分支只覆盖前 5 条。
+
+### 1. 注册
+
+- `app/membership.py`：新增 `GET/POST /register`，会员自行建立账号（姓名、邮箱、
+  密码、确认密码，密码至少 6 位，邮箱唯一）。注册成功即自动登录，并提示到「方案」
+  页开通方案。
+- `templates/register.html`：新增注册表单；`base.html`、`login.html` 增加「注册」入口。
+
+### 2. 修改密码
+
+- `app/membership.py`：新增 `GET/POST /account/password`，仅已登录会员可改自己的
+  密码（校验当前密码、新密码长度与二次确认）。
+- `templates/change_password.html`：新增表单；`account.html` 有入口链接。
+
+### 3. 续订当前方案（不新开第二张卡）
+
+- `app/membership.py`：`POST /account/renew`。同一张 `Membership` 卡上直接更新：
+  `end` 从当前结束日往后延 `plan.duration_days`；有课时上限的方案补满到
+  `credit_limit`。不新建卡（测试断言 active 卡仍只有一张）。
+- 已到期卡从今天起延（不重复付费已过去的天数），未到期卡从自己的结束日起延。
+
+### 4. 改订另一个方案（旧卡→已更换，新卡从今天起算）
+
+- `app/membership.py`：`POST /account/switch`。旧卡 `status="replaced"`，新建一张卡
+  `start=today`、`end=today+duration_days`、课时按新方案 `credit_limit` 重给。
+- 已订的课不动：`Booking.membership_id` 仍指向旧卡，课表和 My bookings 原样显示。
+- `app/models.py`：新增 `PlanChange` 表记录每次 open/renew/switch 事件（结束日与
+  课时前后值，switch 时 `linked_id` 关联新旧卡），在「我的方案」页展示历史。
+- `app/models.py`：`Membership` 增加 `plan_name`、`is_expired`、`credits_exhausted`
+  三个只读属性。
+
+### 5. 到期提醒 + 统一「为什么不能订」
+
+- `app/membership.py`：`book_refusal(session, member)` 是唯一的事实来源，按需求顺序
+  返回第一条原因：已订 → 方案已到期 → 课时用完 → 时段不符 → 时间冲突 → 已满。
+  每个原因带短文案（按钮文字）与详细说明（data-tip，用于 hover/点按）。
+- `app/access.py`：`timetable` / `class_detail` 为每节课计算 `refusals`；方案过期时
+  `timetable` 顶部渲染一条到期说明，且每节课按钮都写「方案已到期」。
+- `templates/timetable.html`、`templates/class_detail.html`：不能订的课用灰色禁用
+  按钮 `button.disabled`，只写一条原因，不再留「点下去才失败」的 Book。
+- `static/style.css` + `static/reveal.js`：禁用按钮 hover/focus/点按（touch 设备）显示
+  `data-tip` 气泡；手机上点感叹号或灰按钮都能看到说明。
+- `app/booking.py`：`book()` 在真正提交时仍调用 `book_refusal` 再查一次（服务器端
+  兜底，不信任前端）。
+
+### 顺带
+
+- `tests/smoke_test.py`：第二笔「已满/已订」拒绝文案断言加入中文关键词
+  （`已满`/`已订`/`已预订`），因为拒绝原因现在以中文展示。
+- `MY bookings` 页拆成「即将上课 / 已结束」两栏（配套需求 8 的 UI 基础，路由层
+  `access.my_bookings` 按状态与时间分区）。
+
+### 验证状态
+
+- `tests/smoke_test.py`：22/22 通过。
+- `tests/edit_clash_test.py`：5/5 通过。
+- `tests/concurrency_test.py`：PASS。
+- `tests/account_membership_test.py`：23/23 通过。
+- 所有页面改动均经真实 HTTP 实测（注册→切换方案→订课→已订/已满/时段不符/到期
+  禁用按钮与 tooltip、到期横幅）。

@@ -17,11 +17,13 @@
         <a href="{{ url_for('scheduling.plans') }}">Plans</a>
       {% else %}
         <a href="{{ url_for('access.my_bookings') }}">My bookings</a>
+        <a href="{{ url_for('membership.account') }}">我的方案</a>
       {% endif %}
       <span class="who">{{ current_user.name }}</span>
       <form method="post" action="{{ url_for('access.logout') }}"><button>Sign out</button></form>
     {% else %}
       <a href="{{ url_for('access.login') }}">Sign in</a>
+      <a href="{{ url_for('membership.register_form') }}">注册</a>
     {% endif %}
   </nav>
 </header>

@@ -8,10 +8,10 @@
 {% if current_user.is_authenticated and current_user.role == 'member' %}
   {% if booked %}
     <span class="tag">you are booked</span>
-  {% elif session.places_left > 0 %}
-    <form method="post" action="{{ url_for('booking.book', session_id=session.id) }}"><button>Book this class</button></form>
+  {% elif refusal %}
+    <button class="disabled" data-tip="{{ refusal[1] }}" disabled>{{ refusal[0] }}</button>
   {% else %}
-    <span class="tag full">full</span>
+    <form method="post" action="{{ url_for('booking.book', session_id=session.id) }}"><button>Book this class</button></form>
   {% endif %}
 {% elif current_user.is_authenticated and current_user.role == 'staff' %}
   <p class="hint">
