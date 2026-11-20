@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}A place is open{% endblock %}
+{% block content %}
+<h1>A place is open</h1>
+<div class="card offer-box">
+  <p><strong>{{ booking.session.class_type.name }}</strong></p>
+  <p>{{ booking.session.start.strftime("%a %d %b, %H:%M") }} · {{ booking.session.instructor.name }} · {{ booking.session.room.name }}</p>
+  <p>Time left <span class="count" data-seconds="{{ seconds }}">{{ seconds }}s</span></p>
+  <form method="post" action="{{ url_for('booking.confirm', booking_id=booking.id) }}"><button>Accept</button></form>
+  <form method="post" action="{{ url_for('booking.decline', booking_id=booking.id) }}"><button class="btn ghost">Decline</button></form>
+  <form method="post" action="{{ url_for('booking.close_offer', booking_id=booking.id) }}"><button class="btn ghost">Close</button></form>
+</div>
+{% endblock %}
+{% block scripts %}{% endblock %}

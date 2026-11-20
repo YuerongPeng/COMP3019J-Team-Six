@@ -1,4 +1,6 @@
-{% if block %}
+{% if block.action == 'wait' %}
+<form method="post" action="{{ url_for('booking.wait', session_id=session_id) }}"><button>Join waitlist</button></form>
+{% elif block %}
 <span class="choice">
   <button type="button" class="blocked" disabled>{{ block.label }}</button>
   {% if block.detail %}

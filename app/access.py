@@ -131,7 +131,8 @@ def login():
             return render_template("login.html"), 200
         session.clear()
         login_user(user)
-        return redirect(url_for("access.timetable"), code=303)
+        from .booking import login_destination
+        return redirect(login_destination(user), code=303)
     return render_template("login.html")
 
 
@@ -156,10 +157,13 @@ def my_bookings():
     past = [b for b in bookings if b.session.start < now]
     upcoming.sort(key=lambda b: b.session.start)
     past.sort(key=lambda b: b.session.start, reverse=True)
-    from .booking import cancel_block
+    from .booking import cancel_block, expire_offers, open_offers, seconds_left
+    expire_offers()
+    offers = [{"booking": b, "seconds": seconds_left(b)} for b in open_offers(current_user)]
     return render_template(
         "my_bookings.html",
         upcoming=upcoming,
         past=past,
+        offers=offers,
         cancel_states={b.id: cancel_block(b, now) for b in upcoming},
     )

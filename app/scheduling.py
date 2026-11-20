@@ -12,7 +12,7 @@ from sqlalchemy.exc import OperationalError
 
 from . import db
 from .access import RuleError, staff_only
-from .booking import booked_count
+from .booking import booked_count, held_count
 from .models import (Booking, ClassSession, ClassType, Instructor, Membership,
                      MembershipPlan, Room)
 
@@ -45,10 +45,10 @@ def validate_class(class_row, existing=False):
             raise RuleError("That room is already in use then.")
 
     if existing:
-        taken = booked_count(class_row.id)
+        taken = held_count(class_row.id)
         if class_row.capacity < taken:
             raise RuleError(
-                "That capacity is below the %d members already booked. "
+                "That capacity is below the %d places already held. "
                 "Remove bookings first, or cancel the class." % taken)
         # A change to the time, instructor or room must not leave a member in two
         # classes at once, and must not overload an instructor or a room.
@@ -63,15 +63,40 @@ def members_double_booked(class_row):
     """How many members already booked here would clash with another booking."""
     affected = set()
     for booking in class_row.bookings:
-        if booking.status != "Booked":
+        if booking.status not in ("Booked", "Offered"):
             continue
         for other in booking.user.bookings:
-            if other.status != "Booked" or other.class_session_id == class_row.id:
+            if other.status not in ("Booked", "Offered") or other.class_session_id == class_row.id:
                 continue
             if other.session.start < class_row.end and class_row.start < other.session.end:
                 affected.add(booking.user_id)
                 break
     return len(affected)
+
+
+def _drop_clashing_waiters(class_row):
+    """A queued member has no seat, so a time change must not be blocked by them.
+
+    If the new time overlaps another class they already hold, remove them from
+    this queue. Booked and offered members are still checked before this runs.
+    """
+    dropped = 0
+    for booking in list(class_row.bookings):
+        if booking.status != "Waiting":
+            continue
+        clashes = False
+        for other in booking.user.bookings:
+            if other.status not in ("Booked", "Offered") or other.class_session_id == class_row.id:
+                continue
+            if other.session.start < class_row.end and class_row.start < other.session.end:
+                clashes = True
+                break
+        if clashes:
+            booking.status = "Cancelled"
+            booking.active = False
+            booking.cancelled_at = datetime.utcnow()
+            dropped += 1
+    return dropped
 
 
 def _opened_stamp(class_row):
@@ -188,6 +213,13 @@ def class_edit(session_id):
             _apply_class_form(class_row, request.form)
             validate_class(class_row, existing=True)
             opened = _keep_cancel_open(class_row, previous_start)
+            dropped = 0
+            if class_row.start != previous_start:
+                dropped = _drop_clashing_waiters(class_row)
+                restarted = datetime.now()
+                for booking in class_row.bookings:
+                    if booking.status == "Offered":
+                        booking.offered_at = restarted
             db.session.commit()
             flash("Class updated on the same id.")
             if opened:
@@ -195,6 +227,11 @@ def class_edit(session_id):
                     "%d booked member(s) can still cancel. The new start is inside "
                     "the two-hour cut-off, so the usual refusal does not apply to them."
                     % opened
+                )
+            if dropped:
+                flash(
+                    "%d waiting member(s) left the queue because the new time overlaps another class."
+                    % dropped
                 )
             return redirect(url_for("scheduling.roster", session_id=class_row.id), code=303)
         except (RuleError, ValueError) as exc:

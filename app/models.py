@@ -100,8 +100,9 @@ class ClassSession(db.Model):
 
     @property
     def places_left(self):
-        """Rule: computed on read, never stored."""
-        return self.capacity - self.booked_count
+        """Rule: computed on read, never stored. An offer holds a place until confirmed."""
+        held = sum(1 for b in self.bookings if b.status in ("Booked", "Offered"))
+        return self.capacity - held
 
 
 class Booking(db.Model):
@@ -116,6 +117,8 @@ class Booking(db.Model):
     # Set when a time change pulls this class inside the two-hour cut-off.
     # That member can still cancel and have the credit returned.
     late_change_cancel = db.Column(db.Boolean, nullable=False, default=False)
+    offered_at = db.Column(db.DateTime)
+    skip_seen = db.Column(db.Boolean, nullable=False, default=False)
 
     user = db.relationship("User", back_populates="bookings")
     session = db.relationship("ClassSession", back_populates="bookings")

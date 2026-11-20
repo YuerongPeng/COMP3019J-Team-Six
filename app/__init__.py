@@ -17,8 +17,13 @@ db = SQLAlchemy()
 login_manager = LoginManager()
 
 
-def _ensure_late_change_column(app):
-    """Add the cancel exception to a database created before this column."""
+def _ensure_booking_columns(app):
+    """Add columns to a database created before waitlist offers."""
+    statements = {
+        "late_change_cancel": "ALTER TABLE booking ADD COLUMN late_change_cancel BOOLEAN NOT NULL DEFAULT 0",
+        "offered_at": "ALTER TABLE booking ADD COLUMN offered_at DATETIME",
+        "skip_seen": "ALTER TABLE booking ADD COLUMN skip_seen BOOLEAN NOT NULL DEFAULT 0",
+    }
     with app.app_context():
         try:
             insp = inspect(db.engine)
@@ -27,12 +32,13 @@ def _ensure_late_change_column(app):
         if not insp.has_table("booking"):
             return
         names = {col["name"] for col in insp.get_columns("booking")}
-        if "late_change_cancel" in names:
-            return
-        db.session.execute(text(
-            "ALTER TABLE booking ADD COLUMN late_change_cancel BOOLEAN NOT NULL DEFAULT 0"
-        ))
-        db.session.commit()
+        changed = False
+        for name, sql in statements.items():
+            if name not in names:
+                db.session.execute(text(sql))
+                changed = True
+        if changed:
+            db.session.commit()
 
 
 def create_app(config_object="config.Config"):
@@ -44,7 +50,7 @@ def create_app(config_object="config.Config"):
     os.makedirs(app.instance_path, exist_ok=True)
 
     db.init_app(app)
-    _ensure_late_change_column(app)
+    _ensure_booking_columns(app)
     login_manager.init_app(app)
     login_manager.login_view = "access.login"
     login_manager.login_message = "Please sign in to continue."

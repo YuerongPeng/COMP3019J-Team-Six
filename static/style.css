@@ -136,6 +136,16 @@ h2 { font-size: 20px; margin: 36px 0 8px; }
 .filters .check input { width: auto; }
 .filters .btn { margin-bottom: 2px; }
 
+.offer-box {
+  max-width: 360px;
+  margin-left: 0;
+  margin-right: auto;
+  display: grid;
+  gap: 10px;
+}
+.offer-box p { margin: 0; }
+.offer-box form { margin: 0; }
+
 .choice { position: relative; display: inline-flex; align-items: center; gap: 8px; }
 button.blocked {
   background: #F1F1F1;

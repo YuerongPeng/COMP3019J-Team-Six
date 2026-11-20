@@ -2,6 +2,13 @@
 {% block title %}My bookings{% endblock %}
 {% block content %}
 <h1>My bookings</h1>
+{% for offer in offers %}
+<a class="card offer-box" href="{{ url_for('booking.offer_page', booking_id=offer.booking.id) }}">
+  <strong>{{ offer.booking.session.class_type.name }}</strong>
+  <span>{{ offer.booking.session.start.strftime("%a %d %b, %H:%M") }}</span>
+  <span class="count" data-seconds="{{ offer.seconds }}">{{ offer.seconds }}s</span>
+</a>
+{% endfor %}
 
 <h2>Upcoming</h2>
 <table>
@@ -27,6 +34,16 @@
             <span class="bang-note">{{ state.detail }}</span>
           </button>
           {% endif %}
+        </span>
+        {% elif b.status == 'Waiting' %}
+        <form method="post" action="{{ url_for('booking.leave', booking_id=b.id) }}"><button class="btn ghost">Leave waitlist</button></form>
+        {% elif b.status == 'Offered' %}
+        <span class="choice">
+          <form method="post" action="{{ url_for('booking.confirm', booking_id=b.id) }}"><button>Confirm</button></form>
+          <form method="post" action="{{ url_for('booking.decline', booking_id=b.id) }}"><button class="btn ghost">Decline</button></form>
+          <button type="button" class="bang" aria-label="A place is open. Confirm to book it.">!
+            <span class="bang-note">A place is open. Confirm to book it.</span>
+          </button>
         </span>
         {% endif %}
       </td>
