@@ -3,7 +3,7 @@
 {% block content %}
 <h1>My bookings</h1>
 
-<h2>即将上课</h2>
+<h2>Upcoming</h2>
 <table>
   <thead><tr><th>Class</th><th>When</th><th>Instructor</th><th>Status</th><th></th></tr></thead>
   <tbody>
@@ -23,12 +23,12 @@
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="5" class="hint">近期没有即将上课的预订。</td></tr>
+    <tr><td colspan="5" class="hint">You have no upcoming bookings.</td></tr>
   {% endfor %}
   </tbody>
 </table>
 
-<h2>已结束</h2>
+<h2>Finished</h2>
 <table>
   <thead><tr><th>Class</th><th>When</th><th>Instructor</th><th>Status</th></tr></thead>
   <tbody>
@@ -40,7 +40,7 @@
       <td>{{ b.status }}</td>
     </tr>
   {% else %}
-    <tr><td colspan="4" class="hint">还没有已结束或已取消的预订。</td></tr>
+    <tr><td colspan="4" class="hint">No finished or cancelled bookings yet.</td></tr>
   {% endfor %}
   </tbody>
 </table>

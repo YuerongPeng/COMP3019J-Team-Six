@@ -65,34 +65,33 @@ def book_refusal(session_row, member):
     already = any(b.class_session_id == session_row.id and b.status == "Booked"
                   for b in member.bookings)
     if already:
-        return "已订", "你已预订这节课"
+        return "Booked", "You already have this class booked"
 
     if membership is None or not membership_covering(membership, session_row.start):
         if membership is None:
-            detail = "你还没有有效方案，请先到「方案」页订阅"
+            detail = "You have no active plan. Subscribe on your Plans page first."
         elif membership.end < date.today():
-            detail = "你的方案已于 %s 到期" % membership.end
+            detail = "Your plan expired on %s" % membership.end
         else:
-            detail = "当前方案不覆盖这节课的日期"
-        return "方案已到期", detail
+            detail = "Your current plan does not cover the date of this class"
+        return "Plan expired", detail
 
     if membership.credits_exhausted:
-        return "课时用完", "你的方案课时已用完，请续订或更换方案"
+        return "No credits", "You have used all the classes on this plan. Renew or switch to keep booking."
 
     if membership.plan.off_peak and session_row.start.hour >= 16:
-        return "时段不符", "此方案只能订16:00前开始的课"
+        return "Wrong time", "This plan can only book classes that start before 16:00"
 
     for other in member.bookings:
         if other.status != "Booked":
             continue
         if other.session.start < session_row.end and session_row.start < other.session.end:
-            weekday = "周" + "一二三四五六日"[other.session.start.weekday()]
-            when = other.session.start.strftime("%H:%M")
-            return "时间冲突", "与%s %s %s重叠" % (
-                weekday, when, other.session.class_type.name)
+            when = other.session.start.strftime("%A %H:%M")
+            return "Time conflict", "Overlaps your %s with %s" % (
+                when, other.session.class_type.name)
 
     if session_row.places_left <= 0:
-        return "已满", "这节课已满"
+        return "Full", "This class is full"
 
     return None
 
@@ -105,10 +104,10 @@ def can_cancel(booking):
     so they may still cancel.
     """
     if booking.status != "Booked":
-        return False, "该预订已不是进行中状态"
+        return False, "That booking is no longer active"
     now = datetime.now()
     if booking.session.start - now < timedelta(hours=2):
-        return False, "距开始不足两小时，不能取消"
+        return False, "Less than two hours to the start, you cannot cancel"
     return True, ""
 
 
@@ -129,16 +128,16 @@ def register():
     confirm = request.form.get("confirm", "")
 
     if not name or not email or not password:
-        flash("请填写姓名、邮箱和密码。")
+        flash("Please fill in your name, email and password.")
         return render_template("register.html"), 200
     if password != confirm:
-        flash("两次输入的密码不一致。")
+        flash("The two passwords do not match.")
         return render_template("register.html"), 200
     if len(password) < 6:
-        flash("密码至少需要 6 位。")
+        flash("The password must be at least 6 characters.")
         return render_template("register.html"), 200
     if User.query.filter_by(email=email).first() is not None:
-        flash("该邮箱已注册。")
+        flash("That email is already registered.")
         return render_template("register.html"), 200
 
     user = User(name=name, email=email, role="member",
@@ -146,7 +145,7 @@ def register():
     db.session.add(user)
     db.session.commit()
     login_user(user)
-    flash("注册成功，已为你登录。请到「方案」页选择一个方案开始使用。")
+    flash("Account created and you are signed in. Choose a plan on the Plans page to get started.")
     return redirect(url_for("access.timetable"), code=303)
 
 
@@ -158,17 +157,17 @@ def change_password():
         new = request.form.get("new", "")
         confirm = request.form.get("confirm", "")
         if not check_password_hash(current_user.password_hash, current):
-            flash("当前密码不正确。")
+            flash("The current password is incorrect.")
             return render_template("change_password.html"), 200
         if len(new) < 6:
-            flash("新密码至少需要 6 位。")
+            flash("The new password must be at least 6 characters.")
             return render_template("change_password.html"), 200
         if new != confirm:
-            flash("两次输入的新密码不一致。")
+            flash("The two new passwords do not match.")
             return render_template("change_password.html"), 200
         current_user.password_hash = generate_password_hash(new)
         db.session.commit()
-        flash("密码已更新。")
+        flash("Password updated.")
         return redirect(url_for("membership.account"), code=303)
     return render_template("change_password.html")
 
@@ -191,7 +190,7 @@ def account():
 def renew():
     card = active_card(current_user.id)
     if card is None:
-        flash("你还没有有效方案，请先订阅。")
+        flash("You have no active plan yet. Subscribe first.")
         return redirect(url_for("membership.account"), code=303)
     return _renew_or_switch(card, card.plan)
 
@@ -202,13 +201,13 @@ def switch_plan():
     plan_id = request.form.get("plan_id", type=int)
     plan = db.session.get(MembershipPlan, plan_id) if plan_id else None
     if plan is None:
-        flash("请选择一个方案。")
+        flash("Please choose a plan.")
         return redirect(url_for("membership.account"), code=303)
     card = active_card(current_user.id)
     if card is None:
         return _open_new_membership(plan, None)
     if plan.id == card.plan_id:
-        flash("这就是你当前的方案。")
+        flash("That is already your current plan.")
         return redirect(url_for("membership.account"), code=303)
     return _renew_or_switch(card, plan)
 
@@ -236,9 +235,9 @@ def _renew_or_switch(card, plan):
                             prior_credits=prior_credits,
                             new_credits=new_credits, linked_id=new_card.id)
         db.session.add(change)
-        message = "已更换为「%s」，新卡从今天开始，课时按新方案重给。" % plan.name
+        message = "Switched to '%s'. The new card starts today and its classes are given by the new plan." % plan.name
         if prior_credits:
-            message += " 旧卡未用完的 %d 次课时作废。" % prior_credits
+            message += " The %d unused classes on the old card are forfeited." % prior_credits
     else:
         # Renew the same card: extend from its own end, top credits back up to
         # the plan limit (no second card).
@@ -250,7 +249,7 @@ def _renew_or_switch(card, plan):
         db.session.add(change)
         card.end = new_end
         card.credits_remaining = new_credits
-        message = "已续订「%s」，有效期延长至 %s。" % (plan.name, new_end)
+        message = "Renewed '%s' until %s." % (plan.name, new_end)
 
     db.session.commit()
     flash(message)
@@ -269,5 +268,5 @@ def _open_new_membership(plan, _unused):
     db.session.add(PlanChange(membership_id=card.id, kind="open", plan_id=plan.id,
                               new_end=new_end, new_credits=plan.credit_limit))
     db.session.commit()
-    flash("已为你开通「%s」，有效期至 %s。" % (plan.name, new_end))
+    flash("Opened '%s' for you, valid until %s." % (plan.name, new_end))
     return redirect(url_for("membership.account"), code=303)

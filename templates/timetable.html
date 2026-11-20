@@ -11,8 +11,8 @@
 
 {% if current_user.is_authenticated and current_user.role == 'member' and plan_expired %}
 <div class="warn note">
-  你的方案已到期，不能预订新课程。请到
-  <a href="{{ url_for('membership.account') }}">我的方案</a> 续订或更换方案。
+  Your plan has expired, so you cannot book new classes. Go to
+  <a href="{{ url_for('membership.account') }}">My plan</a> to renew or switch.
 </div>
 {% endif %}
 

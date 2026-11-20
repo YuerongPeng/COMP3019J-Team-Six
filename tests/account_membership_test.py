@@ -68,7 +68,7 @@ with app.app_context():
 r = client.post("/register", data={
     "name": "Dup", "email": "xin@example.com",
     "password": "secret123", "confirm": "secret123"}, follow_redirects=True)
-check("duplicate email refused", "已注册" in r.get_data(as_text=True), "")
+check("duplicate email refused", "already registered" in r.get_data(as_text=True), "")
 
 client.post("/logout")
 
@@ -80,7 +80,7 @@ check("new user can log in", r.status_code == 303, str(r.status_code))
 r = client.post("/account/password", data={
     "current": "wrong", "new": "newpass1", "confirm": "newpass1"},
     follow_redirects=True)
-check("wrong current password refused", "不正确" in r.get_data(as_text=True), "")
+check("wrong current password refused", "incorrect" in r.get_data(as_text=True), "")
 
 r = client.post("/account/password", data={
     "current": "secret123", "new": "newpass1", "confirm": "newpass1"},
@@ -107,7 +107,7 @@ with app.app_context():
     card_id = card.id
 
 r = client.post("/account/renew", follow_redirects=True)
-check("renew flashes success", "续订" in r.get_data(as_text=True), "")
+check("renew flashes success", "Renewed" in r.get_data(as_text=True), "")
 
 with app.app_context():
     card = db.session.get(Membership, card_id)
@@ -136,7 +136,7 @@ with app.app_context():
 
 r = client.post("/account/switch", data={"plan_id": str(unlimited_id)},
                 follow_redirects=True)
-check("switch flashes success", "更换" in r.get_data(as_text=True), "")
+check("switch flashes success", "Switched" in r.get_data(as_text=True), "")
 
 with app.app_context():
     old = db.session.get(Membership, old_id)
@@ -166,7 +166,7 @@ with app.app_context():
 
 r = client.get("/timetable")
 body = r.get_data(as_text=True)
-check("timetable shows expiry notice", "已到期" in body or "到期" in body, "")
+check("timetable shows expiry notice", "expired" in body.lower() or "expired" in body, "")
 check("timetable shows a grey reason button", 'class="disabled"' in body, "")
 
 # ------------------------------------------------------------------ report

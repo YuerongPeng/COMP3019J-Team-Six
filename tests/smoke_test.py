@@ -109,9 +109,7 @@ with app.app_context():
 
 r = client.post("/classes/%d/book" % target_id, follow_redirects=True)
 body = r.get_data(as_text=True).lower()
-check("second booking refused",
-      "full" in body or "already" in body or "已满" in body or "已订" in body or "已预订" in body,
-      "no refusal text")
+check("second booking refused", "full" in body or "already" in body, "no refusal text")
 
 with app.app_context():
     alex = User.query.filter_by(email="alex@example.com").first()
