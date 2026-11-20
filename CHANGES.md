@@ -96,3 +96,63 @@
 | alex@example.com | member，月卡 unlimited |
 | mei@example.com | member，十次卡 |
 | staff@example.com | staff |
+
+---
+
+## 七、账号与方案（需求 1-4）
+
+> 分支 `account-and-membership`（已 merge `origin/main`）。对应测试
+> `tests/account_membership_test.py`（23 项）。
+>
+> ⚠️ 需求 5（为什么不能订/取消、到期提醒）最终由队友的 `booking.book_block` /
+> `cancel_block` / `plan_notice` 及课表筛选、候补 waitlist 实现，在合并时采用队友
+> 版本；本分支早期写的 `book_refusal` / `can_cancel` 草案已删除。本节只记录
+> 需求 1-4（账号与方案）。
+
+### 1. 注册
+
+- `app/membership.py`：新增 `GET/POST /register`，会员自行建立账号（姓名、邮箱、
+  密码、确认密码，密码至少 6 位，邮箱唯一）。注册成功即自动登录，并提示到「我的
+  方案」页开通方案。
+- `templates/register.html`：新增注册表单；`base.html`、`login.html` 增加「Register」入口。
+
+### 2. 修改密码
+
+- `app/membership.py`：新增 `GET/POST /account/password`，仅已登录会员可改自己的
+  密码（校验当前密码、新密码长度与二次确认）。
+- `templates/change_password.html`：新增表单；`account.html` 有入口链接。
+
+### 3. 续订当前方案（不新开第二张卡）
+
+- `app/membership.py`：`POST /account/renew`。同一张 `Membership` 卡上直接更新：
+  `end` 从当前结束日往后延 `plan.duration_days`；有课时上限的方案补满到
+  `credit_limit`。不新建卡（测试断言 active 卡仍只有一张）。
+- 已到期卡从今天起延（不重复付费已过去的天数），未到期卡从自己的结束日起延
+  （`_renewal_end`）。
+
+### 4. 改订另一个方案（旧卡→已更换，新卡从今天起算）
+
+- `app/membership.py`：`POST /account/switch`。旧卡 `status="replaced"`，新建一张卡
+  `start=today`、`end=today+duration_days`、课时按新方案 `credit_limit` 重给。
+- 已订的课不动：`Booking.membership_id` 仍指向旧卡，课表和 My bookings 原样显示。
+- `app/models.py`：新增 `PlanChange` 表记录每次 open/renew/switch 事件（结束日与
+  课时前后值，switch 时 `linked_id` 关联新旧卡），在「我的方案」页展示历史。
+- `app/models.py`：`Membership` 增加 `plan_name`、`is_expired`、`credits_exhausted`
+  三个只读属性。
+
+### 合并 origin/main（冲突解决）
+
+- 与我改动重叠的「为什么不能订/取消」采用队友实现，5 个冲突文件
+  （`access.py`、`booking.py`、`timetable.html`、`class_detail.html`、
+  `my_bookings.html`）取队友版本。
+- 删除我分支的死代码 `book_refusal` / `can_cancel` / `membership_covering`。
+- 保留我独有的需求 1-4（`membership.py` 路由 + `PlanChange` + 三个新模板 + 测试）。
+- 界面语言统一为英语（`a012277`）。
+
+### 验证状态
+
+- `tests/smoke_test.py`：22/22 通过。
+- `tests/edit_clash_test.py`：5/5 通过。
+- `tests/concurrency_test.py`：PASS。
+- `tests/account_membership_test.py`：23/23 通过。
+- 真实 HTTP 实测：注册→换方案→续订→账号页 全部 200，状态正确；无冲突标记残留。

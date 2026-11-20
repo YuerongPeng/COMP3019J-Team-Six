@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}My plan{% endblock %}
+{% block content %}
+<h1>My plan</h1>
+
+{% if card %}
+  <div class="card">
+    <p><strong>{{ card.plan.name }}</strong>
+       {% if card.plan.off_peak %}<span class="chip">off-peak</span>{% endif %}</p>
+    <p>Valid: {{ card.start }} to {{ card.end }}
+       {% if card.is_expired %}<span class="warn">expired</span>{% endif %}</p>
+    <p>Classes:
+      {% if card.credits_remaining is none %}unlimited{% else %}{{ card.credits_remaining }}{% endif %}
+      {% if card.credits_exhausted %}<span class="warn">no classes left</span>{% endif %}</p>
+
+    <form method="post" action="{{ url_for('membership.renew') }}" style="display:inline">
+      <button>Renew current plan</button>
+    </form>
+    <p class="hint">Renewing keeps the same card: the end date extends from the current end, and a plan with a class limit is topped back up.</p>
+  </div>
+{% else %}
+  <p class="hint">You have no plan yet. Choose one below to get started.</p>
+{% endif %}
+
+<h2>Switch plan</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>Plan</th><th>Duration</th><th>Classes</th><th>Time</th><th></th></tr></thead>
+    <tbody>
+    {% for p in plans %}
+      <tr>
+        <td>{{ p.name }}</td>
+        <td>{{ p.duration_days }} days</td>
+        <td>{{ p.credit_limit if p.credit_limit is not none else "unlimited" }}</td>
+        <td>{{ "off-peak" if p.off_peak else "all day" }}</td>
+        <td>
+          {% if card and card.plan_id == p.id %}
+            <span class="tag">current plan</span>
+          {% else %}
+            <form method="post" action="{{ url_for('membership.switch_plan') }}" style="margin:0">
+              <input type="hidden" name="plan_id" value="{{ p.id }}">
+              <button>Switch to this plan</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">Switching marks the old card "replaced", the new card starts today with the new plan's classes; bookings already made stay on the old card.</p>
+</div>
+
+{% if history %}
+<h2>History</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>When</th><th>Action</th><th>Plan</th><th>End date</th><th>Classes</th></tr></thead>
+    <tbody>
+    {% for h in history %}
+      <tr>
+        <td>{{ h.at.strftime("%Y-%m-%d %H:%M") }}</td>
+        <td>{{ {"open":"opened","renew":"renewed","switch":"switched"}.get(h.kind, h.kind) }}</td>
+        <td>{{ h.plan.name }}</td>
+        <td>{% if h.prior_end %}{{ h.prior_end }} → {% endif %}{{ h.new_end or "—" }}</td>
+        <td>
+          {% if h.prior_credits is not none %}{{ h.prior_credits }} → {% endif %}
+          {{ h.new_credits if h.new_credits is not none else "unlimited" }}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<p><a href="{{ url_for('membership.change_password') }}">Change password</a></p>
+{% endblock %}

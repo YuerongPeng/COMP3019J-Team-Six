@@ -329,6 +329,41 @@ input:focus, select:focus, textarea:focus {
 }
 .btn.ghost:hover { background: #F4F4F4; }
 
+/* disabled button with a tooltip reason (tap / hover / focus) */
+button.disabled {
+  background: #F1F1F1;
+  color: var(--muted);
+  border-color: var(--line);
+  cursor: not-allowed;
+  position: relative;
+}
+button.disabled:hover { background: #F1F1F1; }
+button.disabled .hint { font-weight: 700; color: #B3261E; }
+button.disabled::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  max-width: 260px;
+  padding: 8px 10px;
+  background: var(--dark);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--radius);
+  white-space: normal;
+  text-align: left;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 20;
+}
+button.disabled:hover::after,
+button.disabled:focus::after,
+button.disabled.tapped::after { opacity: 1; }
+.warn.note { margin: 24px 0 0; }
+.warn.note a { color: #B3261E; }
+
 /* footer */
 .foot {
   background: var(--dark);
