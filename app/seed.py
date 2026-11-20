@@ -39,7 +39,9 @@ def seed():
                 password_hash=generate_password_hash("password"))
     mei = User(name="Mei Lin", email="mei@example.com", role="member",
                password_hash=generate_password_hash("password"))
-    db.session.add_all([staff, alex, mei])
+    maya_user = User(name="Maya Lin", email="maya@example.com", role="instructor",
+                     password_hash=generate_password_hash("password"))
+    db.session.add_all([staff, alex, mei, maya_user])
     db.session.flush()
 
     db.session.add_all([
@@ -49,7 +51,7 @@ def seed():
                    end=date.today() + timedelta(days=90), credits_remaining=6),
     ])
 
-    maya = Instructor(name="Maya Lin", profile="Yoga and mobility")
+    maya = Instructor(name="Maya Lin", profile="Yoga and mobility", user_id=maya_user.id)
     quinn = Instructor(name="Quinn He", profile="Yoga and cycling")
     rob = Instructor(name="Rob Diaz", profile="Strength")
     db.session.add_all([maya, quinn, rob])

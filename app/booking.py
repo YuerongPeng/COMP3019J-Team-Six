@@ -28,10 +28,10 @@ def booked_count(session_id):
 
 
 def held_count(session_id):
-    """Booked rows plus an offer that is waiting for the member to confirm."""
+    """Seats that are not free: booked, offered, attended or no-show."""
     return (db.session.query(func.count(Booking.id))
             .filter(Booking.class_session_id == session_id,
-                    Booking.status.in_(("Booked", "Offered")))
+                    Booking.status.in_(("Booked", "Offered", "Attended", "No-show")))
             .scalar())
 
 
@@ -132,6 +132,8 @@ def book(session_id):
             raise RuleError("No credits left on this plan.")
         if held_count(session_id) >= class_row.capacity:
             raise RuleError("That class is full.")
+        if class_row.end <= datetime.now():
+            raise RuleError("That class has ended.")
         if Booking.query.filter_by(user_id=current_user.id,
                                    class_session_id=session_id,
                                    status="Booked").first():
@@ -214,6 +216,8 @@ def _offer_next(session_id):
     class_row = db.session.get(ClassSession, session_id)
     if class_row is None:
         return False
+    if class_row.end <= datetime.now():
+        return False
     offered = False
     while held_count(session_id) < class_row.capacity:
         nxt = (Booking.query
@@ -257,6 +261,8 @@ def wait(session_id):
         class_row = db.session.get(ClassSession, session_id)
         if class_row is None:
             raise RuleError("That class no longer exists.")
+        if class_row.end <= datetime.now():
+            raise RuleError("That class has ended.")
         if held_count(session_id) < class_row.capacity:
             raise RuleError("That class still has a place. Book it directly.")
         existing = Booking.query.filter(
@@ -290,6 +296,11 @@ def confirm(booking_id):
     booking = db.get_or_404(Booking, booking_id)
     if booking.user_id != current_user.id:
         abort(403)
+    if booking.status == "Offered" and booking.session.end <= datetime.now():
+        close_finished()
+        db.session.commit()
+        flash("That class has ended. The offer was cancelled and no class was charged.")
+        return redirect(url_for("access.my_bookings"), code=303)
     expire_offers()
     try:
         _lock_class(booking.class_session_id)
@@ -297,6 +308,11 @@ def confirm(booking_id):
         if booking.status != "Offered":
             raise RuleError("That place is no longer offered to you.")
         class_row = booking.session
+        if class_row.end <= datetime.now():
+            close_finished()
+            db.session.commit()
+            flash("That class has ended. The offer was cancelled and no class was charged.")
+            return redirect(url_for("access.my_bookings"), code=303)
         membership = active_membership(current_user.id)
         try:
             _eligible(class_row, membership, ignore_booking_id=booking.id)
@@ -340,9 +356,12 @@ def decline(booking_id):
         booking.status = "Cancelled"
         booking.active = False
         booking.cancelled_at = datetime.utcnow()
-        _offer_next(session_id)
+        offered = _offer_next(session_id)
         db.session.commit()
-        flash("Declined. The place was offered to the next person.")
+        if offered:
+            flash("Declined. The place was offered to the next person.")
+        else:
+            flash("Declined.")
     except RuleError as exc:
         db.session.rollback()
         flash(str(exc))
@@ -421,7 +440,7 @@ def open_offers(user):
             .filter_by(user_id=user.id, status="Offered")
             .order_by(Booking.offered_at.asc())
             .all())
-    return [b for b in rows if seconds_left(b, now) > 0]
+    return [b for b in rows if seconds_left(b, now) > 0 and b.session.end > now]
 
 
 def unseen_pass(user):
@@ -435,6 +454,8 @@ def unseen_pass(user):
 
 def login_destination(user):
     """Where a member goes immediately after signing in."""
+    close_finished()
+    db.session.commit()
     expire_offers()
     if user.role != "member":
         return url_for("access.timetable")
@@ -451,6 +472,8 @@ def login_destination(user):
 @login_required
 def offer_page(booking_id):
     _require_member()
+    close_finished()
+    db.session.commit()
     expire_offers()
     booking = db.get_or_404(Booking, booking_id)
     if booking.user_id != current_user.id:
@@ -525,3 +548,51 @@ def close_passed(booking_id):
     booking.skip_seen = True
     db.session.commit()
     return redirect(url_for("access.my_bookings"), code=303)
+
+
+def close_finished(now=None):
+    """Drop queue places and unconfirmed offers once the class has ended.
+
+    Nobody is marked no-show. No credit is charged or returned.
+    """
+    now = now or datetime.now()
+    rows = (Booking.query
+            .join(ClassSession, Booking.class_session_id == ClassSession.id)
+            .filter(ClassSession.end <= now,
+                    Booking.status.in_(("Offered", "Waiting")))
+            .all())
+    for booking in rows:
+        booking.status = "Cancelled"
+        booking.active = False
+        booking.offered_at = None
+        booking.cancelled_at = datetime.utcnow()
+    return bool(rows)
+
+
+def attendance_list(class_row):
+    """Booked, attended and no-show rows. A finished class drops its queue first."""
+    close_finished()
+    db.session.commit()
+    class_row = db.session.get(ClassSession, class_row.id)
+    rows = [b for b in class_row.bookings if b.status in ("Booked", "Attended", "No-show")]
+    rows.sort(key=lambda b: (b.user.name.lower(), b.id))
+    return class_row, rows
+
+
+def record_attendance(class_row, booking, result):
+    """The class instructor marks a booked member after the class has ended.
+
+    Attended and no-show can be swapped. Neither one changes credits, frees the
+    seat, or offers the place to the waitlist.
+    """
+    if class_row.instructor is None or class_row.instructor.user_id != current_user.id:
+        abort(403)
+    if datetime.now() < class_row.end:
+        raise RuleError("Attendance can be recorded only after the class has ended.")
+    close_finished()
+    if (booking.class_session_id != class_row.id
+            or booking.status not in ("Booked", "Attended", "No-show")):
+        raise RuleError("Only a booked member of this class can be marked.")
+    if result not in ("Attended", "No-show"):
+        raise RuleError("Choose attended or no-show.")
+    booking.status = result

@@ -149,6 +149,10 @@ def logout():
 def my_bookings():
     if current_user.role == "staff":
         abort(403)
+    from .booking import cancel_block, close_finished, expire_offers, open_offers, seconds_left
+    close_finished()
+    db.session.commit()
+    expire_offers()
     now = datetime.now()
     bookings = (Booking.query
                 .filter_by(user_id=current_user.id)
@@ -157,8 +161,6 @@ def my_bookings():
     past = [b for b in bookings if b.session.start < now]
     upcoming.sort(key=lambda b: b.session.start)
     past.sort(key=lambda b: b.session.start, reverse=True)
-    from .booking import cancel_block, expire_offers, open_offers, seconds_left
-    expire_offers()
     offers = [{"booking": b, "seconds": seconds_left(b)} for b in open_offers(current_user)]
     return render_template(
         "my_bookings.html",

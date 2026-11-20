@@ -6,13 +6,14 @@ saved, and updates a class without changing its identity, so existing bookings s
 """
 from datetime import datetime, timedelta
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask_login import current_user, login_required
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from . import db
 from .access import RuleError, staff_only
-from .booking import booked_count, held_count
+from .booking import attendance_list, held_count, record_attendance
 from .models import (Booking, ClassSession, ClassType, Instructor, Membership,
                      MembershipPlan, Room)
 
@@ -246,15 +247,55 @@ def class_edit(session_id):
                            types=ClassType.query.all(),
                            instructors=Instructor.query.all(),
                            rooms=Room.query.all(),
-                           booked=booked_count(class_row.id) if class_row else 0)
+                           booked=held_count(class_row.id) if class_row else 0)
+
+
+def _roster_page(class_row, marking):
+    class_row, rows = attendance_list(class_row)
+    ended = class_row.end <= datetime.now()
+    return render_template(
+        "roster.html",
+        session=class_row,
+        rows=rows,
+        can_mark=marking and ended,
+        ended=ended,
+        heading="Attendance" if marking else "Roster",
+    )
 
 
 @bp.get("/admin/classes/<int:session_id>/roster")
 @staff_only
 def roster(session_id):
     class_row = db.get_or_404(ClassSession, session_id)
-    rows = [b for b in class_row.bookings if b.status == "Booked"]
-    return render_template("roster.html", session=class_row, rows=rows)
+    return _roster_page(class_row, marking=False)
+
+
+@bp.route("/classes/<int:session_id>/attendance", methods=["GET", "POST"])
+@login_required
+def attendance(session_id):
+    class_row = db.get_or_404(ClassSession, session_id)
+    if class_row.instructor.user_id != current_user.id:
+        abort(403)
+    if request.method == "POST":
+        try:
+            booking_id = int(request.form.get("booking_id", ""))
+        except ValueError:
+            abort(404)
+        booking = db.session.get(Booking, booking_id)
+        if booking is None:
+            abort(404)
+        try:
+            record_attendance(class_row, booking, request.form.get("result", ""))
+            db.session.commit()
+            flash("Attendance saved.")
+        except RuleError as exc:
+            db.session.rollback()
+            flash(str(exc))
+        except OperationalError:
+            db.session.rollback()
+            flash("The system is busy. Please try again.")
+        return redirect(url_for("scheduling.attendance", session_id=session_id), code=303)
+    return _roster_page(class_row, marking=True)
 
 
 @bp.route("/admin/plans", methods=["GET", "POST"])

@@ -15,7 +15,7 @@
       {% if current_user.role == 'staff' %}
         <a href="{{ url_for('scheduling.class_list') }}">Manage classes</a>
         <a href="{{ url_for('scheduling.plans') }}">Plans</a>
-      {% else %}
+      {% elif current_user.role != 'instructor' %}
         <a href="{{ url_for('access.my_bookings') }}">My bookings</a>
         <a href="{{ url_for('membership.account') }}">My plan</a>
       {% endif %}

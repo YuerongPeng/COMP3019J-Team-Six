@@ -1,17 +1,51 @@
 {% extends "base.html" %}
-{% block title %}Roster{% endblock %}
+{% block title %}{{ heading }}{% endblock %}
 {% block content %}
-<h1>Roster · {{ session.class_type.name }}</h1>
-<p>{{ session.start.strftime("%a %d %b, %H:%M") }} · {{ session.instructor.name }} · {{ session.room.name }}</p>
-<p><strong>{{ rows|length }}</strong> booked of {{ session.capacity }}.</p>
+<h1>{{ heading }} · {{ session.class_type.name }}</h1>
+<p>{{ session.start.strftime("%a %d %b, %H:%M") }}–{{ session.end.strftime("%H:%M") }} · {{ session.instructor.name }} · {{ session.room.name }}</p>
+{% if not ended %}
+<p class="hint">Attendance can be recorded after the class ends.</p>
+{% elif not can_mark %}
+<p class="hint">The instructor records attendance. This list is view only.</p>
+{% endif %}
+<p><strong>{{ rows|length }}</strong> members on this list.</p>
 <table>
-  <thead><tr><th>Member</th><th>Plan</th><th>Status</th></tr></thead>
+  <thead>
+    <tr>
+      <th>Member</th><th>Plan</th><th>Status</th>
+      {% if can_mark %}<th></th>{% endif %}
+    </tr>
+  </thead>
   <tbody>
   {% for b in rows %}
-    <tr><td>{{ b.user.name }}</td><td>{{ b.membership.plan.name }}</td><td>{{ b.status }}</td></tr>
+    <tr>
+      <td>{{ b.user.name }}</td>
+      <td>{{ b.membership.plan.name }}</td>
+      <td>{{ b.status }}</td>
+      {% if can_mark %}
+      <td>
+        <form method="post" action="{{ url_for('scheduling.attendance', session_id=session.id) }}">
+          <input type="hidden" name="booking_id" value="{{ b.id }}">
+          <span class="choice">
+            {% if b.status == 'Attended' %}
+            <button type="button" class="blocked" disabled>Attended</button>
+            {% else %}
+            <button name="result" value="Attended">Attended</button>
+            {% endif %}
+            {% if b.status == 'No-show' %}
+            <button type="button" class="blocked" disabled>No-show</button>
+            {% else %}
+            <button name="result" value="No-show">No-show</button>
+            {% endif %}
+          </span>
+        </form>
+      </td>
+      {% endif %}
+    </tr>
   {% else %}
-    <tr><td colspan="3" class="hint">Nobody booked yet.</td></tr>
+    <tr><td colspan="{{ 4 if can_mark else 3 }}" class="hint">Nobody booked this class.</td></tr>
   {% endfor %}
   </tbody>
 </table>
+<p><a href="{{ url_for('access.class_detail', session_id=session.id) }}">Back to the class</a></p>
 {% endblock %}

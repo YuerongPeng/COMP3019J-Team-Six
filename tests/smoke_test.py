@@ -13,10 +13,10 @@ HERE = os.path.abspath(os.path.dirname(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from datetime import timedelta  # noqa: E402
+from datetime import datetime, timedelta  # noqa: E402
 
 from app import create_app, db  # noqa: E402
-from app.models import Booking, ClassSession, User  # noqa: E402
+from app.models import Booking, ClassSession, Membership, User  # noqa: E402
 from app.seed import seed  # noqa: E402
 
 DB = os.path.join(HERE, "smoke.db")
@@ -177,6 +177,139 @@ with app.app_context():
 
 r = client.get("/admin/plans")
 check("staff plans 200", r.status_code == 200, str(r.status_code))
+
+# ---------------------------------------------------------------- attendance
+r = client.post("/logout")
+
+with app.app_context():
+    alex = User.query.filter_by(email="alex@example.com").first()
+    own = [b for b in alex.bookings if b.status == "Booked" and b.class_session_id != target_id][0]
+    attend_id = own.class_session_id
+    alex_booking_id = own.id
+
+r = client.post("/login", data={"email": "mei@example.com", "password": "password"})
+r = client.post("/classes/%d/book" % attend_id)
+check("mei books the attendance class", r.status_code == 303, str(r.status_code))
+r = client.post("/logout")
+
+with app.app_context():
+    mei = User.query.filter_by(email="mei@example.com").first()
+    mei_booking = Booking.query.filter_by(
+        user_id=mei.id, class_session_id=attend_id, status="Booked").first()
+    mei_booking_id = mei_booking.id
+    credits_before = mei_booking.membership.credits_remaining
+    places_before = db.session.get(ClassSession, attend_id).places_left
+
+r = client.post("/login", data={"email": "maya@example.com", "password": "password"})
+check("instructor login 303", r.status_code == 303, str(r.status_code))
+
+r = client.get("/classes/%d/attendance" % attend_id)
+body = r.get_data(as_text=True)
+check("attendance waits until the class ends",
+      r.status_code == 200 and "after the class ends" in body.lower() and 'name="result"' not in body,
+      str(r.status_code))
+
+r = client.post("/classes/%d/attendance" % attend_id,
+                data={"booking_id": str(mei_booking_id), "result": "Attended"},
+                follow_redirects=True)
+check("mark before the end is refused",
+      "after the class has ended" in r.get_data(as_text=True).lower(), "no refusal")
+
+with app.app_context():
+    still = db.session.get(Booking, mei_booking_id)
+    check("early mark does not change the booking", still.status == "Booked", still.status)
+    row = db.session.get(ClassSession, attend_id)
+    row.start = datetime.now() - timedelta(hours=2)
+    row.end = datetime.now() - timedelta(hours=1)
+    db.session.commit()
+
+r = client.post("/classes/%d/attendance" % attend_id,
+                data={"booking_id": str(mei_booking_id), "result": "Attended"},
+                follow_redirects=True)
+check("instructor marks attended", "attendance saved" in r.get_data(as_text=True).lower(), "no save")
+
+with app.app_context():
+    marked = db.session.get(Booking, mei_booking_id)
+    check("attended keeps the credit", marked.membership.credits_remaining == credits_before,
+          str(marked.membership.credits_remaining))
+    check("attended still holds the place",
+          db.session.get(ClassSession, attend_id).places_left == places_before,
+          str(db.session.get(ClassSession, attend_id).places_left))
+
+r = client.post("/classes/%d/attendance" % attend_id,
+                data={"booking_id": str(mei_booking_id), "result": "No-show"},
+                follow_redirects=True)
+check("instructor can switch to no-show", "attendance saved" in r.get_data(as_text=True).lower(), "no save")
+
+with app.app_context():
+    marked = db.session.get(Booking, mei_booking_id)
+    check("no-show keeps the credit", marked.membership.credits_remaining == credits_before,
+          str(marked.membership.credits_remaining))
+    check("no-show still holds the place",
+          db.session.get(ClassSession, attend_id).places_left == places_before,
+          str(db.session.get(ClassSession, attend_id).places_left))
+    check("no-show is the stored result", marked.status == "No-show", marked.status)
+    mei = User.query.filter_by(email="mei@example.com").first()
+    alex_user = User.query.filter_by(email="alex@example.com").first()
+    card = Membership.query.filter_by(user_id=alex_user.id).first()
+    db.session.add(Booking(user_id=mei.id, class_session_id=attend_id,
+                           membership_id=marked.membership_id, status="Waiting"))
+    db.session.add(Booking(user_id=card.user_id, class_session_id=attend_id,
+                           membership_id=card.id, status="Offered", offered_at=datetime.now()))
+    db.session.commit()
+
+r = client.get("/classes/%d/attendance" % attend_id)
+body = r.get_data(as_text=True)
+check("finished class hides the queue", "Waiting" not in body and "Offered" not in body, "")
+
+with app.app_context():
+    waiting = Booking.query.filter_by(class_session_id=attend_id, status="Waiting").count()
+    offered = Booking.query.filter_by(class_session_id=attend_id, status="Offered").count()
+    check("finished class does not promote the queue", waiting == 0 and offered == 0,
+          "waiting=%s offered=%s" % (waiting, offered))
+    marked = db.session.get(Booking, mei_booking_id)
+    check("voided offer does not refund a credit",
+          marked.membership.credits_remaining == credits_before,
+          str(marked.membership.credits_remaining))
+
+r = client.post("/classes/%d/attendance" % attend_id,
+                data={"booking_id": str(alex_booking_id), "result": "Attended"},
+                follow_redirects=True)
+check("second member can be marked", "attendance saved" in r.get_data(as_text=True).lower(), "no save")
+
+r = client.post("/logout")
+r = client.post("/login", data={"email": "alex@example.com", "password": "password"})
+r = client.get("/my-bookings")
+check("member sees attended in past bookings", "Attended" in r.get_data(as_text=True), "status missing")
+r = client.post("/classes/%d/attendance" % attend_id,
+                data={"booking_id": str(alex_booking_id), "result": "No-show"})
+check("member cannot mark attendance", r.status_code == 403, str(r.status_code))
+
+r = client.post("/logout")
+r = client.post("/login", data={"email": "staff@example.com", "password": "password"})
+r = client.get("/admin/classes/%d/roster" % attend_id)
+body = r.get_data(as_text=True)
+check("staff roster shows the result", "No-show" in body and 'name="result"' not in body, "buttons or missing status")
+r = client.post("/classes/%d/attendance" % attend_id,
+                data={"booking_id": str(mei_booking_id), "result": "Attended"})
+check("staff cannot mark attendance", r.status_code == 403, str(r.status_code))
+
+new_start = (datetime.now() - timedelta(days=3)).replace(minute=0, second=0, microsecond=0)
+new_end = new_start + timedelta(hours=1)
+r = client.post("/admin/classes/%d/edit" % attend_id,
+                data=edit_payload(attend_id,
+                                  start=new_start.strftime("%Y-%m-%dT%H:%M"),
+                                  end=new_end.strftime("%Y-%m-%dT%H:%M")),
+                follow_redirects=True)
+check("staff can still change the time after attendance",
+      "class updated" in r.get_data(as_text=True).lower(),
+      r.get_data(as_text=True)[:180])
+
+with app.app_context():
+    moved = db.session.get(ClassSession, attend_id)
+    check("time change after attendance was saved",
+          moved.start == new_start and moved.end == new_end,
+          moved.start.strftime("%Y-%m-%d %H:%M"))
 
 # ---------------------------------------------------------------------- report
 failed = [x for x in results if not x[1]]

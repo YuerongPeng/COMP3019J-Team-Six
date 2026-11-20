@@ -16,7 +16,7 @@ class User(db.Model, UserMixin):
     name = db.Column(db.String(60), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    role = db.Column(db.String(10), nullable=False, default="member")   # member | staff
+    role = db.Column(db.String(10), nullable=False, default="member")   # member | staff | instructor
     phone = db.Column(db.String(30))
     status = db.Column(db.String(10), nullable=False, default="active")
 
@@ -89,8 +89,10 @@ class Instructor(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(60), nullable=False)
     profile = db.Column(db.Text)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), unique=True)
 
     skills = db.relationship("InstructorSkill", back_populates="instructor")
+    user = db.relationship("User")
 
 
 class InstructorSkill(db.Model):
@@ -136,8 +138,13 @@ class ClassSession(db.Model):
 
     @property
     def places_left(self):
-        """Rule: computed on read, never stored. An offer holds a place until confirmed."""
-        held = sum(1 for b in self.bookings if b.status in ("Booked", "Offered"))
+        """Rule: computed on read, never stored.
+
+        An offer holds a place until it is confirmed or dropped. Attended and
+        no-show keep the place, so the seat is not sold again.
+        """
+        held = sum(1 for b in self.bookings
+                   if b.status in ("Booked", "Offered", "Attended", "No-show"))
         return self.capacity - held
 
 
