@@ -25,10 +25,15 @@
   </select>
   <label for="start">Start</label>
   <input id="start" name="start" type="datetime-local"
-         value="{{ session.start.strftime('%Y-%m-%dT%H:%M') if session else '' }}" required>
+         value="{{ session.start.strftime('%Y-%m-%dT%H:%M') if session else '' }}" required
+         {% if time_locked %}readonly{% endif %}>
   <label for="end">End</label>
   <input id="end" name="end" type="datetime-local"
-         value="{{ session.end.strftime('%Y-%m-%dT%H:%M') if session else '' }}" required>
+         value="{{ session.end.strftime('%Y-%m-%dT%H:%M') if session else '' }}" required
+         {% if time_locked %}readonly{% endif %}>
+  {% if time_locked %}
+  <p class="hint">This class has started, so the start and end can no longer be changed.</p>
+  {% endif %}
   <label for="capacity">Capacity{% if session %} · {{ booked }} booked{% endif %}</label>
   <input id="capacity" name="capacity" type="number" min="1"
          value="{{ session.capacity if session else 14 }}" required

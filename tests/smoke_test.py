@@ -294,6 +294,12 @@ r = client.post("/classes/%d/attendance" % attend_id,
                 data={"booking_id": str(mei_booking_id), "result": "Attended"})
 check("staff cannot mark attendance", r.status_code == 403, str(r.status_code))
 
+with app.app_context():
+    current = db.session.get(ClassSession, attend_id)
+    kept_start = current.start
+    kept_end = current.end
+    kept_capacity = current.capacity
+
 new_start = (datetime.now() - timedelta(days=3)).replace(minute=0, second=0, microsecond=0)
 new_end = new_start + timedelta(hours=1)
 r = client.post("/admin/classes/%d/edit" % attend_id,
@@ -301,15 +307,36 @@ r = client.post("/admin/classes/%d/edit" % attend_id,
                                   start=new_start.strftime("%Y-%m-%dT%H:%M"),
                                   end=new_end.strftime("%Y-%m-%dT%H:%M")),
                 follow_redirects=True)
-check("staff can still change the time after attendance",
+body = r.get_data(as_text=True).lower()
+check("started class refuses a time change",
+      "has started" in body and "nothing was written" in body, body[:180])
+
+with app.app_context():
+    moved = db.session.get(ClassSession, attend_id)
+    check("time stays after a started class refuses the edit",
+          moved.start == kept_start and moved.end == kept_end,
+          moved.start.strftime("%Y-%m-%d %H:%M"))
+
+r = client.get("/admin/classes/%d/edit" % attend_id)
+body = r.get_data(as_text=True)
+check("started class shows the time fields locked",
+      'id="start"' in body and "readonly" in body and "has started" in body.lower(),
+      "lock missing")
+
+r = client.post("/admin/classes/%d/edit" % attend_id,
+                data=edit_payload(attend_id, capacity=str(kept_capacity - 1)),
+                follow_redirects=True)
+check("room and capacity can still be saved after the start",
       "class updated" in r.get_data(as_text=True).lower(),
       r.get_data(as_text=True)[:180])
 
 with app.app_context():
     moved = db.session.get(ClassSession, attend_id)
-    check("time change after attendance was saved",
-          moved.start == new_start and moved.end == new_end,
-          moved.start.strftime("%Y-%m-%d %H:%M"))
+    same_time = (moved.start.replace(second=0, microsecond=0) == kept_start.replace(second=0, microsecond=0)
+                 and moved.end.replace(second=0, microsecond=0) == kept_end.replace(second=0, microsecond=0))
+    check("a non-time save keeps the started class time",
+          moved.capacity == kept_capacity - 1 and same_time,
+          "capacity=%s start=%s" % (moved.capacity, moved.start.strftime("%Y-%m-%d %H:%M")))
 
 # ---------------------------------------------------------------------- report
 failed = [x for x in results if not x[1]]

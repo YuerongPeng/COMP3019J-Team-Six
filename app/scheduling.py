@@ -117,6 +117,22 @@ def _still_the_opened_class(class_row, form):
     return all(form.get("base_" + key) == value for key, value in opened.items())
 
 
+def _reject_started_time_change(class_row, form):
+    """Once a class has started, its start and end stay as they are.
+
+    Room, instructor and capacity can still be saved. The check uses the time
+    stored now, so a form opened before the start cannot move the class later.
+    """
+    if datetime.now() < class_row.start:
+        return
+    current = _opened_stamp(class_row)
+    if form.get("start") != current["start"] or form.get("end") != current["end"]:
+        raise RuleError(
+            "This class has started, so its start and end can no longer be changed. "
+            "Nothing was written."
+        )
+
+
 def _apply_class_form(class_row, form):
     class_type = db.session.get(ClassType, int(form["class_type_id"]))
     instructor = db.session.get(Instructor, int(form["instructor_id"]))
@@ -211,6 +227,7 @@ def class_edit(session_id):
                     "Nothing was written. The form now shows the current class."
                 )
             previous_start = class_row.start
+            _reject_started_time_change(class_row, request.form)
             _apply_class_form(class_row, request.form)
             validate_class(class_row, existing=True)
             opened = _keep_cancel_open(class_row, previous_start)
@@ -247,7 +264,8 @@ def class_edit(session_id):
                            types=ClassType.query.all(),
                            instructors=Instructor.query.all(),
                            rooms=Room.query.all(),
-                           booked=held_count(class_row.id) if class_row else 0)
+                           booked=held_count(class_row.id) if class_row else 0,
+                           time_locked=class_row.start <= datetime.now())
 
 
 def _roster_page(class_row, marking):

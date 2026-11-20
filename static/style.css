@@ -291,6 +291,7 @@ input, select, textarea {
   background: #FFFFFF;
   color: var(--ink);
 }
+input[readonly] { background: #F1F1F1; color: var(--muted); }
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--accent);
