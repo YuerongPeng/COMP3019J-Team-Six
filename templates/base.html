@@ -34,6 +34,21 @@
   {% block content %}{% endblock %}
 </main>
 <footer class="foot">Team Six · skeleton</footer>
-  <script src="{{ url_for('static', filename='reveal.js') }}"></script>
+<script src="{{ url_for('static', filename='reveal.js') }}"></script>
+<script>
+document.querySelectorAll(".count").forEach(function (node) {
+  var left = parseInt(node.getAttribute("data-seconds"), 10) || 0;
+  function paint() {
+    var minutes = Math.floor(left / 60);
+    var seconds = left % 60;
+    node.textContent = minutes + ":" + (seconds < 10 ? "0" : "") + seconds;
+  }
+  paint();
+  setInterval(function () {
+    if (left > 0) left -= 1;
+    paint();
+  }, 1000);
+});
+</script>
 </body>
 </html>

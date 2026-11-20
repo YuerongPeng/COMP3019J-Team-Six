@@ -6,10 +6,10 @@
 <p>Instructor {{ session.instructor.name }} · {{ session.room.name }} · capacity {{ session.capacity }}</p>
 <p><strong>{{ session.places_left }}</strong> places left.</p>
 {% if current_user.is_authenticated and current_user.role == 'member' %}
-  {% if booked %}
-    <span class="tag">you are booked</span>
-  {% elif refusal %}
-    <button class="disabled" data-tip="{{ refusal[1] }}" disabled>{{ refusal[0] }}</button>
+  {% if block %}
+    {% with session_id=session.id %}
+    {% include "_book_control.html" %}
+    {% endwith %}
   {% else %}
     <form method="post" action="{{ url_for('booking.book', session_id=session.id) }}"><button>Book this class</button></form>
   {% endif %}

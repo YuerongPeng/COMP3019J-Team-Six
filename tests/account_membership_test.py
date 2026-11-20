@@ -167,7 +167,8 @@ with app.app_context():
 r = client.get("/timetable")
 body = r.get_data(as_text=True)
 check("timetable shows expiry notice", "expired" in body.lower() or "expired" in body, "")
-check("timetable shows a grey reason button", 'class="disabled"' in body, "")
+check("timetable shows a grey reason button",
+      'class="blocked"' in body or 'class="disabled"' in body, "")
 
 # ------------------------------------------------------------------ report
 failed = [x for x in results if not x[1]]

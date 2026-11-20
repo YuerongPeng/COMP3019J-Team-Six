@@ -11,9 +11,34 @@ import os
 from flask import Flask, render_template
 from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import inspect, text
 
 db = SQLAlchemy()
 login_manager = LoginManager()
+
+
+def _ensure_booking_columns(app):
+    """Add columns to a database created before waitlist offers."""
+    statements = {
+        "late_change_cancel": "ALTER TABLE booking ADD COLUMN late_change_cancel BOOLEAN NOT NULL DEFAULT 0",
+        "offered_at": "ALTER TABLE booking ADD COLUMN offered_at DATETIME",
+        "skip_seen": "ALTER TABLE booking ADD COLUMN skip_seen BOOLEAN NOT NULL DEFAULT 0",
+    }
+    with app.app_context():
+        try:
+            insp = inspect(db.engine)
+        except Exception:
+            return
+        if not insp.has_table("booking"):
+            return
+        names = {col["name"] for col in insp.get_columns("booking")}
+        changed = False
+        for name, sql in statements.items():
+            if name not in names:
+                db.session.execute(text(sql))
+                changed = True
+        if changed:
+            db.session.commit()
 
 
 def create_app(config_object="config.Config"):
@@ -25,6 +50,7 @@ def create_app(config_object="config.Config"):
     os.makedirs(app.instance_path, exist_ok=True)
 
     db.init_app(app)
+    _ensure_booking_columns(app)
     login_manager.init_app(app)
     login_manager.login_view = "access.login"
     login_manager.login_message = "Please sign in to continue."

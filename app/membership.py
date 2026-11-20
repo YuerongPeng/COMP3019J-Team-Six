@@ -2,11 +2,10 @@
 """Membership and account module.
 
 Owns the member-facing account flow: registration, password change, renewing the
-current plan, and switching to another plan. Holds the shared helpers that decide
-what a calendar row's disabled button should say, so the timetable, the class
-detail page and the server-side booking check all read from one source of truth.
+current plan, and switching to another plan. The booking/refusal logic (why a
+button is disabled) lives in ``booking.book_block`` / ``booking.cancel_block``.
 """
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required, login_user
@@ -18,14 +17,8 @@ from .models import Membership, MembershipPlan, PlanChange, User
 bp = Blueprint("membership", __name__)
 
 
-def _active_membership(user_id):
-    # Deferred so this module has no import-time dependency on app.access.
-    from .access import active_membership
-    return active_membership(user_id)
-
-
 # --------------------------------------------------------------------------
-# Shared decision helpers
+# Renew / switch helpers
 # --------------------------------------------------------------------------
 
 def _renewal_end(current_end, plan):
@@ -38,77 +31,11 @@ def _renewal_end(current_end, plan):
     return base + timedelta(days=plan.duration_days)
 
 
-def membership_covering(membership, session_start):
-    """Does this membership card cover a class at ``session_start``?"""
-    if membership is None or membership.status != "active":
-        return False
-    return membership.end >= session_start.date() and membership.start <= session_start.date()
-
-
 def active_card(user_id):
     return (Membership.query
             .filter_by(user_id=user_id, status="active")
             .order_by(Membership.start.desc())
             .first())
-
-
-def book_refusal(session_row, member):
-    """Return ``None`` to allow booking, or a (message, detail) pair.
-
-    ``detail`` is the full explanation shown on click / hover / mobile; ``message``
-    is the short text written on the grey button. Several rules can fail at once, so
-    the first match in the required order wins: already booked, plan expired, no
-    credits, off-peak window, time conflict, full.
-    """
-    membership = _active_membership(member.id)
-
-    already = any(b.class_session_id == session_row.id and b.status == "Booked"
-                  for b in member.bookings)
-    if already:
-        return "Booked", "You already have this class booked"
-
-    if membership is None or not membership_covering(membership, session_row.start):
-        if membership is None:
-            detail = "You have no active plan. Subscribe on your Plans page first."
-        elif membership.end < date.today():
-            detail = "Your plan expired on %s" % membership.end
-        else:
-            detail = "Your current plan does not cover the date of this class"
-        return "Plan expired", detail
-
-    if membership.credits_exhausted:
-        return "No credits", "You have used all the classes on this plan. Renew or switch to keep booking."
-
-    if membership.plan.off_peak and session_row.start.hour >= 16:
-        return "Wrong time", "This plan can only book classes that start before 16:00"
-
-    for other in member.bookings:
-        if other.status != "Booked":
-            continue
-        if other.session.start < session_row.end and session_row.start < other.session.end:
-            when = other.session.start.strftime("%A %H:%M")
-            return "Time conflict", "Overlaps your %s with %s" % (
-                when, other.session.class_type.name)
-
-    if session_row.places_left <= 0:
-        return "Full", "This class is full"
-
-    return None
-
-
-def can_cancel(booking):
-    """Whether ``booking`` may still be cancelled, plus a reason when it may not.
-
-    The two-hour cut-off is waived when staff moved the start time into the
-    cut-off window after the member booked: the member did not create the risk,
-    so they may still cancel.
-    """
-    if booking.status != "Booked":
-        return False, "That booking is no longer active"
-    now = datetime.now()
-    if booking.session.start - now < timedelta(hours=2):
-        return False, "Less than two hours to the start, you cannot cancel"
-    return True, ""
 
 
 # --------------------------------------------------------------------------

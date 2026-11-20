@@ -9,14 +9,31 @@
   </div>
 </section>
 
-{% if current_user.is_authenticated and current_user.role == 'member' and plan_expired %}
-<div class="warn note">
-  Your plan has expired, so you cannot book new classes. Go to
-  <a href="{{ url_for('membership.account') }}">My plan</a> to renew or switch.
-</div>
-{% endif %}
-
 <div class="card reveal" id="timetable">
+  {% if plan_notice %}<p class="warn">{{ plan_notice }}</p>{% endif %}
+  <form class="filters" method="get" action="{{ url_for('access.timetable') }}">
+    <div>
+      <label for="date">Date</label>
+      <input id="date" name="date" type="date" value="{{ chosen_date }}">
+    </div>
+    <div>
+      <label for="type">Class</label>
+      <select id="type" name="type">
+        <option value="">All types</option>
+        {% for t in types %}
+        <option value="{{ t.id }}" {{ 'selected' if chosen_type == t.id }}>{{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <label class="check" for="open">
+      <input id="open" name="open" type="checkbox" value="1" {{ 'checked' if open_only }}>
+      Only with places
+    </label>
+    <button type="submit">Filter</button>
+    {% if chosen_date or chosen_type or open_only %}
+    <a class="btn ghost" href="{{ url_for('access.timetable') }}">Show all</a>
+    {% endif %}
+  </form>
   <table>
     <thead>
       <tr><th>When</th><th>Class</th><th>Instructor</th><th>Room</th><th>Places</th><th></th></tr>
@@ -31,19 +48,16 @@
         <td><span class="chip{{ ' full' if s.places_left == 0 }}">{{ s.places_left }} / {{ s.capacity }}</span></td>
         <td>
           {% if current_user.is_authenticated and current_user.role == 'member' %}
-            {% if s.id in refusals %}
-              {% set msg, detail = refusals[s.id] %}
-              <button class="disabled" data-tip="{{ detail }}" disabled>{{ msg }}</button>
-            {% elif s.id in mine %}
-              <span class="tag">you are booked</span>
-            {% else %}
-              <form method="post" action="{{ url_for('booking.book', session_id=s.id) }}"><button>Book</button></form>
-            {% endif %}
+            {% with block=blocks.get(s.id), session_id=s.id %}
+            {% include "_book_control.html" %}
+            {% endwith %}
           {% elif not current_user.is_authenticated %}
             <a href="{{ url_for('access.login') }}">Sign in to book</a>
           {% endif %}
         </td>
       </tr>
+    {% else %}
+      <tr><td colspan="6" class="hint">No classes match this filter.</td></tr>
     {% endfor %}
     </tbody>
   </table>
