@@ -99,17 +99,22 @@
 
 ---
 
-## 七、账号与方案（全新功能，需求 1-5）
+## 七、账号与方案（需求 1-4）
 
-> 分支 `account-and-membership`。对应测试 `tests/account_membership_test.py`
-> （23 项）。需求 6-16 由其他成员在同一 iteration 处理，本分支只覆盖前 5 条。
+> 分支 `account-and-membership`（已 merge `origin/main`）。对应测试
+> `tests/account_membership_test.py`（23 项）。
+>
+> ⚠️ 需求 5（为什么不能订/取消、到期提醒）最终由队友的 `booking.book_block` /
+> `cancel_block` / `plan_notice` 及课表筛选、候补 waitlist 实现，在合并时采用队友
+> 版本；本分支早期写的 `book_refusal` / `can_cancel` 草案已删除。本节只记录
+> 需求 1-4（账号与方案）。
 
 ### 1. 注册
 
 - `app/membership.py`：新增 `GET/POST /register`，会员自行建立账号（姓名、邮箱、
-  密码、确认密码，密码至少 6 位，邮箱唯一）。注册成功即自动登录，并提示到「方案」
-  页开通方案。
-- `templates/register.html`：新增注册表单；`base.html`、`login.html` 增加「注册」入口。
+  密码、确认密码，密码至少 6 位，邮箱唯一）。注册成功即自动登录，并提示到「我的
+  方案」页开通方案。
+- `templates/register.html`：新增注册表单；`base.html`、`login.html` 增加「Register」入口。
 
 ### 2. 修改密码
 
@@ -122,7 +127,8 @@
 - `app/membership.py`：`POST /account/renew`。同一张 `Membership` 卡上直接更新：
   `end` 从当前结束日往后延 `plan.duration_days`；有课时上限的方案补满到
   `credit_limit`。不新建卡（测试断言 active 卡仍只有一张）。
-- 已到期卡从今天起延（不重复付费已过去的天数），未到期卡从自己的结束日起延。
+- 已到期卡从今天起延（不重复付费已过去的天数），未到期卡从自己的结束日起延
+  （`_renewal_end`）。
 
 ### 4. 改订另一个方案（旧卡→已更换，新卡从今天起算）
 
@@ -134,26 +140,14 @@
 - `app/models.py`：`Membership` 增加 `plan_name`、`is_expired`、`credits_exhausted`
   三个只读属性。
 
-### 5. 到期提醒 + 统一「为什么不能订」
+### 合并 origin/main（冲突解决）
 
-- `app/membership.py`：`book_refusal(session, member)` 是唯一的事实来源，按需求顺序
-  返回第一条原因：已订 → 方案已到期 → 课时用完 → 时段不符 → 时间冲突 → 已满。
-  每个原因带短文案（按钮文字）与详细说明（data-tip，用于 hover/点按）。
-- `app/access.py`：`timetable` / `class_detail` 为每节课计算 `refusals`；方案过期时
-  `timetable` 顶部渲染一条到期说明，且每节课按钮都写「方案已到期」。
-- `templates/timetable.html`、`templates/class_detail.html`：不能订的课用灰色禁用
-  按钮 `button.disabled`，只写一条原因，不再留「点下去才失败」的 Book。
-- `static/style.css` + `static/reveal.js`：禁用按钮 hover/focus/点按（touch 设备）显示
-  `data-tip` 气泡；手机上点感叹号或灰按钮都能看到说明。
-- `app/booking.py`：`book()` 在真正提交时仍调用 `book_refusal` 再查一次（服务器端
-  兜底，不信任前端）。
-
-### 顺带
-
-- `tests/smoke_test.py`：第二笔「已满/已订」拒绝文案断言加入中文关键词
-  （`已满`/`已订`/`已预订`），因为拒绝原因现在以中文展示。
-- `MY bookings` 页拆成「即将上课 / 已结束」两栏（配套需求 8 的 UI 基础，路由层
-  `access.my_bookings` 按状态与时间分区）。
+- 与我改动重叠的「为什么不能订/取消」采用队友实现，5 个冲突文件
+  （`access.py`、`booking.py`、`timetable.html`、`class_detail.html`、
+  `my_bookings.html`）取队友版本。
+- 删除我分支的死代码 `book_refusal` / `can_cancel` / `membership_covering`。
+- 保留我独有的需求 1-4（`membership.py` 路由 + `PlanChange` + 三个新模板 + 测试）。
+- 界面语言统一为英语（`a012277`）。
 
 ### 验证状态
 
@@ -161,5 +155,4 @@
 - `tests/edit_clash_test.py`：5/5 通过。
 - `tests/concurrency_test.py`：PASS。
 - `tests/account_membership_test.py`：23/23 通过。
-- 所有页面改动均经真实 HTTP 实测（注册→切换方案→订课→已订/已满/时段不符/到期
-  禁用按钮与 tooltip、到期横幅）。
+- 真实 HTTP 实测：注册→换方案→续订→账号页 全部 200，状态正确；无冲突标记残留。
