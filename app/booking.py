@@ -457,6 +457,8 @@ def login_destination(user):
     close_finished()
     db.session.commit()
     expire_offers()
+    if user.role == "instructor":
+        return url_for("scheduling.my_classes")
     if user.role != "member":
         return url_for("access.timetable")
     passed = unseen_pass(user)

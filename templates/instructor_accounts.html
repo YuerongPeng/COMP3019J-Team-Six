@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Instructor accounts{% endblock %}
+{% block content %}
+<h1>Instructor accounts</h1>
+<table>
+  <thead><tr><th>Instructor</th><th>Login</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for i in instructors %}
+    <tr><td>{{ i.name }}</td><td>{{ i.user.email if i.user else "-" }}</td><td>{{ "Linked" if i.user else "Not linked" }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>Create and link an instructor login</h2>
+{% if instructors|selectattr("user_id", "none")|list %}
+<form method="post" class="narrow">
+  <label for="instructor_id">Instructor</label>
+  <select id="instructor_id" name="instructor_id" required>
+    {% for i in instructors if not i.user_id %}<option value="{{ i.id }}">{{ i.name }}</option>{% endfor %}
+  </select>
+  <label for="name">Account name</label>
+  <input id="name" name="name" required>
+  <label for="email">Email</label>
+  <input id="email" name="email" type="email" required>
+  <label for="password">Temporary password</label>
+  <input id="password" name="password" type="password" minlength="6" required>
+  <button>Create and link account</button>
+</form>
+{% else %}
+<p class="hint">All instructors currently have a linked login.</p>
+{% endif %}
+{% endblock %}

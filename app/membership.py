@@ -7,7 +7,7 @@ button is disabled) lives in ``booking.book_block`` / ``booking.cancel_block``.
 """
 from datetime import date, timedelta
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required, login_user
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -102,6 +102,8 @@ def change_password():
 @bp.get("/account")
 @login_required
 def account():
+    if current_user.role != "member":
+        abort(403)
     card = active_card(current_user.id)
     plans = MembershipPlan.query.order_by(MembershipPlan.id).all()
     history = (PlanChange.query
@@ -115,6 +117,8 @@ def account():
 @bp.post("/account/renew")
 @login_required
 def renew():
+    if current_user.role != "member":
+        abort(403)
     card = active_card(current_user.id)
     if card is None:
         flash("You have no active plan yet. Subscribe first.")
@@ -125,6 +129,8 @@ def renew():
 @bp.post("/account/switch")
 @login_required
 def switch_plan():
+    if current_user.role != "member":
+        abort(403)
     plan_id = request.form.get("plan_id", type=int)
     plan = db.session.get(MembershipPlan, plan_id) if plan_id else None
     if plan is None:

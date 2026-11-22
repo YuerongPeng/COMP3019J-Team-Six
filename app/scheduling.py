@@ -14,8 +14,9 @@ from sqlalchemy.exc import OperationalError
 from . import db
 from .access import RuleError, staff_only
 from .booking import attendance_list, held_count, record_attendance
-from .models import (Booking, ClassSession, ClassType, Instructor, Membership,
-                     MembershipPlan, Room)
+from .models import (Booking, ClassChangeProposal, ClassSession, ClassType,
+                     Instructor, InstructorAbsenceRequest, Membership,
+                     MembershipPlan, Room, User)
 
 bp = Blueprint("scheduling", __name__)
 
@@ -63,7 +64,8 @@ def validate_class(class_row, existing=False):
 def members_double_booked(class_row):
     """How many members already booked here would clash with another booking."""
     affected = set()
-    for booking in class_row.bookings:
+    bookings = Booking.query.filter_by(class_session_id=class_row.id).all()
+    for booking in bookings:
         if booking.status not in ("Booked", "Offered"):
             continue
         for other in booking.user.bookings:
@@ -151,6 +153,28 @@ def _apply_class_form(class_row, form):
     class_row.capacity = int(form["capacity"])
 
 
+def _proposal_candidate(class_row, form):
+    """Validate a proposed version without changing the visible class row."""
+    candidate = ClassSession(
+        id=class_row.id,
+        class_type_id=int(form["class_type_id"]),
+        instructor_id=int(form["instructor_id"]),
+        room_id=int(form["room_id"]),
+        start=datetime.fromisoformat(form["start"]),
+        end=datetime.fromisoformat(form["end"]),
+        capacity=int(form["capacity"]),
+    )
+    candidate.class_type = db.session.get(ClassType, candidate.class_type_id)
+    candidate.instructor = db.session.get(Instructor, candidate.instructor_id)
+    candidate.room = db.session.get(Room, candidate.room_id)
+    if not candidate.class_type or not candidate.instructor or not candidate.room:
+        raise RuleError("That class type, instructor or room no longer exists.")
+    if candidate.end <= candidate.start:
+        raise RuleError("The class must end after it starts.")
+    validate_class(candidate, existing=True)
+    return candidate
+
+
 def _keep_cancel_open(class_row, previous_start):
     """If the new start is inside the cut-off, booked members may still cancel.
 
@@ -176,6 +200,71 @@ def class_list():
                 .order_by(ClassSession.start)
                 .all())
     return render_template("classes_manage.html", sessions=sessions)
+
+
+@bp.route("/admin/instructors/accounts", methods=["GET", "POST"])
+@staff_only
+def instructor_accounts():
+    if request.method == "POST":
+        instructor = db.session.get(Instructor, request.form.get("instructor_id", type=int))
+        if instructor is not None:
+            db.session.execute(
+                text("UPDATE instructor SET user_id = user_id WHERE id = :i"),
+                {"i": instructor.id},
+            )
+            db.session.refresh(instructor)
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        if instructor is None:
+            flash("Choose a valid instructor.")
+        elif instructor.user_id is not None:
+            flash("This instructor already has a login account.")
+        elif not name or not email or len(password) < 6:
+            flash("Enter a name, email and password of at least 6 characters.")
+        elif User.query.filter_by(email=email).first():
+            flash("That email address is already in use.")
+        else:
+            from werkzeug.security import generate_password_hash
+            user = User(name=name, email=email, role="instructor",
+                        password_hash=generate_password_hash(password))
+            db.session.add(user)
+            db.session.flush()
+            instructor.user_id = user.id
+            db.session.commit()
+            flash("Instructor login created and linked.")
+            return redirect(url_for("scheduling.instructor_accounts"), code=303)
+    instructors = Instructor.query.order_by(Instructor.name).all()
+    return render_template("instructor_accounts.html", instructors=instructors)
+
+
+@bp.get("/admin/change-requests")
+@staff_only
+def change_requests():
+    proposals = (ClassChangeProposal.query
+                 .filter_by(status="Pending")
+                 .order_by(ClassChangeProposal.created_at.desc()).all())
+    absences = (InstructorAbsenceRequest.query
+                .filter_by(status="Pending")
+                .order_by(InstructorAbsenceRequest.created_at.desc()).all())
+    return render_template("change_requests.html", proposals=proposals, absences=absences)
+
+
+@bp.post("/admin/proposals/<int:proposal_id>/cancel")
+@staff_only
+def cancel_proposal(proposal_id):
+    proposal = db.get_or_404(ClassChangeProposal, proposal_id)
+    db.session.execute(
+        text("UPDATE class_session SET capacity = capacity WHERE id = :i"),
+        {"i": proposal.class_session_id},
+    )
+    db.session.refresh(proposal)
+    if proposal.status == "Pending":
+        proposal.status = "Cancelled"
+        proposal.decided_at = datetime.utcnow()
+        db.session.commit()
+        flash("Pending change cancelled.")
+    return redirect(url_for("scheduling.change_requests"), code=303)
 
 
 @bp.route("/admin/classes/new", methods=["GET", "POST"])
@@ -226,8 +315,45 @@ def class_edit(session_id):
                     "Another staff member saved this class while this form was open. "
                     "Nothing was written. The form now shows the current class."
                 )
+            if ClassChangeProposal.query.filter_by(
+                    class_session_id=session_id, status="Pending").first():
+                raise RuleError("This class already has a change waiting for instructor approval.")
             previous_start = class_row.start
             _reject_started_time_change(class_row, request.form)
+            proposed_instructor_id = int(request.form["instructor_id"])
+            proposed_room_id = int(request.form["room_id"])
+            proposed_start = datetime.fromisoformat(request.form["start"])
+            proposed_end = datetime.fromisoformat(request.form["end"])
+            needs_approval = (
+                proposed_instructor_id != class_row.instructor_id
+                or proposed_room_id != class_row.room_id
+                or proposed_start != class_row.start
+                or proposed_end != class_row.end
+            )
+            if needs_approval:
+                candidate = _proposal_candidate(class_row, request.form)
+                target = candidate.instructor
+                if target.user_id is None or target.user.role != "instructor":
+                    raise RuleError("The proposed instructor needs a linked instructor login before this change can be sent.")
+                proposal = ClassChangeProposal(
+                    class_session_id=class_row.id,
+                    submitted_by_user_id=current_user.id,
+                    target_instructor_id=target.id,
+                    class_type_id=candidate.class_type_id,
+                    instructor_id=candidate.instructor_id,
+                    room_id=candidate.room_id,
+                    start=candidate.start,
+                    end=candidate.end,
+                    capacity=candidate.capacity,
+                    base_instructor_id=class_row.instructor_id,
+                    base_room_id=class_row.room_id,
+                    base_start=class_row.start,
+                    base_end=class_row.end,
+                )
+                db.session.add(proposal)
+                db.session.commit()
+                flash("Change sent to %s for approval. The timetable remains unchanged until accepted." % target.name)
+                return redirect(url_for("scheduling.change_requests"), code=303)
             _apply_class_form(class_row, request.form)
             validate_class(class_row, existing=True)
             opened = _keep_cancel_open(class_row, previous_start)
@@ -265,7 +391,10 @@ def class_edit(session_id):
                            instructors=Instructor.query.all(),
                            rooms=Room.query.all(),
                            booked=held_count(class_row.id) if class_row else 0,
-                           time_locked=class_row.start <= datetime.now())
+                           time_locked=class_row.start <= datetime.now(),
+                           pending_proposal=(ClassChangeProposal.query
+                                             .filter_by(class_session_id=class_row.id,
+                                                        status="Pending").first()))
 
 
 def _roster_page(class_row, marking):
@@ -278,6 +407,8 @@ def _roster_page(class_row, marking):
         can_mark=marking and ended,
         ended=ended,
         heading="Attendance" if marking else "Roster",
+        back_to_my_classes=(current_user.is_authenticated
+                            and current_user.role == "instructor"),
     )
 
 
@@ -314,6 +445,122 @@ def attendance(session_id):
             flash("The system is busy. Please try again.")
         return redirect(url_for("scheduling.attendance", session_id=session_id), code=303)
     return _roster_page(class_row, marking=True)
+
+
+@bp.get("/instructor/classes")
+@login_required
+def my_classes():
+    if current_user.role != "instructor":
+        abort(403)
+    instructor = Instructor.query.filter_by(user_id=current_user.id).first()
+    if instructor is None:
+        abort(403)
+    sessions = (ClassSession.query
+                .filter_by(instructor_id=instructor.id)
+                .filter(ClassSession.start >= datetime.now())
+                .order_by(ClassSession.start).all())
+    pending_absences = {
+        row.class_session_id for row in InstructorAbsenceRequest.query
+        .filter_by(instructor_id=instructor.id, status="Pending").all()
+    }
+    proposals = (ClassChangeProposal.query
+                 .filter_by(target_instructor_id=instructor.id, status="Pending")
+                 .order_by(ClassChangeProposal.created_at.desc()).all())
+    return render_template("instructor_classes.html", instructor=instructor,
+                           sessions=sessions, pending_absences=pending_absences,
+                           proposals=proposals)
+
+
+@bp.post("/classes/<int:session_id>/cannot-teach")
+@login_required
+def cannot_teach(session_id):
+    if current_user.role != "instructor":
+        abort(403)
+    class_row = db.get_or_404(ClassSession, session_id)
+    instructor = Instructor.query.filter_by(user_id=current_user.id).first()
+    if instructor is None or class_row.instructor_id != instructor.id:
+        abort(403)
+    if class_row.start <= datetime.now():
+        flash("A request can only be submitted for a future class.")
+    elif InstructorAbsenceRequest.query.filter_by(
+            class_session_id=session_id, instructor_id=instructor.id,
+            status="Pending").first():
+        flash("A request for this class is already waiting for staff.")
+    else:
+        row = InstructorAbsenceRequest(
+            class_session_id=session_id,
+            instructor_id=instructor.id,
+            requested_by_user_id=current_user.id,
+            reason=request.form.get("reason", "").strip()[:255],
+        )
+        db.session.add(row)
+        db.session.commit()
+        flash("Request sent to staff. The class has not been changed.")
+    return redirect(url_for("scheduling.my_classes"), code=303)
+
+
+@bp.post("/instructor/proposals/<int:proposal_id>/<action>")
+@login_required
+def respond_to_proposal(proposal_id, action):
+    if current_user.role != "instructor" or action not in ("accept", "decline"):
+        abort(403)
+    proposal = db.get_or_404(ClassChangeProposal, proposal_id)
+    if proposal.target_instructor.user_id != current_user.id:
+        abort(403)
+    class_row = db.get_or_404(ClassSession, proposal.class_session_id)
+    db.session.execute(
+        text("UPDATE class_session SET capacity = capacity WHERE id = :i"),
+        {"i": class_row.id},
+    )
+    db.session.refresh(proposal)
+    if proposal.status != "Pending":
+        flash("This change has already been decided.")
+        return redirect(url_for("scheduling.my_classes"), code=303)
+    if action == "decline":
+        proposal.status = "Declined"
+        proposal.decided_at = datetime.utcnow()
+        db.session.commit()
+        flash("Change declined. The original class remains in place.")
+        return redirect(url_for("scheduling.my_classes"), code=303)
+    try:
+        db.session.refresh(class_row)
+        if (class_row.instructor_id != proposal.base_instructor_id
+                or class_row.room_id != proposal.base_room_id
+                or class_row.start != proposal.base_start
+                or class_row.end != proposal.base_end):
+            raise RuleError("The class changed after this proposal was created. Ask staff to submit it again.")
+        previous_start = class_row.start
+        if previous_start <= datetime.now() and proposal.start != previous_start:
+            raise RuleError("This class has started, so its time can no longer be changed.")
+        class_row.class_type_id = proposal.class_type_id
+        class_row.instructor_id = proposal.instructor_id
+        class_row.room_id = proposal.room_id
+        class_row.start = proposal.start
+        class_row.end = proposal.end
+        class_row.capacity = proposal.capacity
+        validate_class(class_row, existing=True)
+        _keep_cancel_open(class_row, previous_start)
+        if class_row.start != previous_start:
+            _drop_clashing_waiters(class_row)
+            restarted = datetime.now()
+            for booking in class_row.bookings:
+                if booking.status == "Offered":
+                    booking.offered_at = restarted
+        proposal.status = "Accepted"
+        proposal.decided_at = datetime.utcnow()
+        for absence in InstructorAbsenceRequest.query.filter_by(
+                class_session_id=class_row.id, status="Pending").all():
+            absence.status = "Resolved"
+            absence.resolved_at = datetime.utcnow()
+        db.session.commit()
+        flash("Change accepted. Your schedule now shows the updated class.")
+    except (RuleError, ValueError) as exc:
+        db.session.rollback()
+        flash(str(exc))
+    except OperationalError:
+        db.session.rollback()
+        flash("The system is busy. Please try again.")
+    return redirect(url_for("scheduling.my_classes"), code=303)
 
 
 @bp.route("/admin/plans", methods=["GET", "POST"])

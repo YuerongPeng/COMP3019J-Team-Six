@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}My classes{% endblock %}
+{% block content %}
+<h1>My classes</h1>
+
+{% if proposals %}
+<h2>Changes awaiting your decision</h2>
+{% for p in proposals %}
+<div class="card">
+  <p><strong>{{ p.session.class_type.name }}</strong> · {{ p.session.start.strftime("%a %d %b, %H:%M") }} · {{ p.session.room.name }}</p>
+  <p>Proposed: {{ p.class_type.name }} · {{ p.start.strftime("%a %d %b, %H:%M") }}–{{ p.end.strftime("%H:%M") }} · {{ p.room.name }} · {{ p.capacity }} places · {{ p.instructor.name }}</p>
+  <p class="hint">The timetable and member bookings still show the current schedule until you accept.</p>
+  <form method="post" action="{{ url_for('scheduling.respond_to_proposal', proposal_id=p.id, action='accept') }}" class="inline-form">
+    <button>Accept change</button>
+  </form>
+  <form method="post" action="{{ url_for('scheduling.respond_to_proposal', proposal_id=p.id, action='decline') }}" class="inline-form">
+    <button class="secondary">Decline</button>
+  </form>
+</div>
+{% endfor %}
+{% endif %}
+
+<table>
+  <thead><tr><th>When</th><th>Class</th><th>Room</th><th>People</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for s in sessions %}
+    <tr>
+      <td>{{ s.start.strftime("%a %d %b, %H:%M") }}–{{ s.end.strftime("%H:%M") }}</td>
+      <td>{{ s.class_type.name }}</td>
+      <td>{{ s.room.name }}</td>
+      <td>{{ s.booked_count }} / {{ s.capacity }}</td>
+      <td>{{ "Request sent" if s.id in pending_absences else s.status }}</td>
+      <td class="actions">
+        <a class="btn ghost" href="{{ url_for('scheduling.attendance', session_id=s.id) }}">View class list</a>
+        {% if s.id not in pending_absences %}
+        <form method="post" action="{{ url_for('scheduling.cannot_teach', session_id=s.id) }}" class="inline-form">
+          <button class="secondary">I can't teach</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="hint">No upcoming classes assigned to you.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

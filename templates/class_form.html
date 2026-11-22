@@ -2,6 +2,9 @@
 {% block title %}{{ "Edit class" if session else "New class" }}{% endblock %}
 {% block content %}
 <h1>{{ "Edit class" if session else "New class" }}</h1>
+{% if pending_proposal %}
+<p class="warn">A change is waiting for {{ pending_proposal.target_instructor.name }} to respond. Cancel it from Change requests before editing this class again.</p>
+{% endif %}
 <form method="post" class="narrow">
   {% if session %}
   <input type="hidden" name="base_class_type_id" value="{{ session.class_type_id }}">
@@ -41,7 +44,7 @@
   {% if session %}
   <p id="capacity-warning" class="warn" hidden></p>
   {% endif %}
-  <button>{{ "Save changes" if session else "Create class" }}</button>
+  <button {% if pending_proposal %}disabled{% endif %}>{{ "Save changes" if session else "Create class" }}</button>
 </form>
 {% if session %}
 <p class="hint">Saving keeps this class id, so existing bookings stay attached. If another staff member has already saved this class, this save is refused and the form shows the current class.</p>
