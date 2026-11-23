@@ -70,6 +70,7 @@ def seed():
 
     db.session.add_all([
         InstructorSkill(instructor_id=maya.id, class_type_id=yoga.id),
+        InstructorSkill(instructor_id=maya.id, class_type_id=pilates.id),
         InstructorSkill(instructor_id=quinn.id, class_type_id=yoga.id),
         InstructorSkill(instructor_id=quinn.id, class_type_id=spin.id),
         InstructorSkill(instructor_id=rob.id, class_type_id=strength.id),

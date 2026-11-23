@@ -163,6 +163,12 @@ def _still_the_opened_class(class_row, form):
     return all(form.get("base_" + key) == value for key, value in opened.items())
 
 
+def _reject_past_start(start):
+    """A new or not-yet-started class cannot be given a start time that has passed."""
+    if start <= datetime.now():
+        raise RuleError("The start time is already in the past. Nothing was written.")
+
+
 def _reject_started_time_change(class_row, form):
     """Once a class has started, its start and end stay as they are.
 
@@ -222,8 +228,9 @@ def _proposal_candidate(class_row, form):
 def _keep_cancel_open(class_row, previous_start):
     """If the new start is inside the cut-off, booked members may still cancel.
 
-    Returns how many bookings were given that chance. A start that stays at
-    least two hours away clears the exception, because the normal rule applies.
+    The exception lasts only until the class starts. A start that stays at
+    least two hours away clears it, because the normal rule applies.
+    Returns how many bookings were given that chance.
     """
     if class_row.start == previous_start:
         return 0
@@ -324,6 +331,7 @@ def class_new():
                 end=datetime.fromisoformat(request.form["end"]),
                 capacity=int(request.form["capacity"]),
             )
+            _reject_past_start(class_row.start)
             validate_class(class_row)
             db.session.add(class_row)
             db.session.commit()
@@ -364,6 +372,8 @@ def class_edit(session_id):
                 raise RuleError("This class already has a change waiting for instructor approval.")
             previous_start = class_row.start
             _reject_started_time_change(class_row, request.form)
+            if datetime.now() < class_row.start:
+                _reject_past_start(datetime.fromisoformat(request.form["start"]))
             proposed_instructor_id = int(request.form["instructor_id"])
             proposed_room_id = int(request.form["room_id"])
             proposed_start = datetime.fromisoformat(request.form["start"])

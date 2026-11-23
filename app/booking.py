@@ -69,8 +69,14 @@ def book_block(user, class_row):
     if not user.is_authenticated or user.role != "member":
         return None
     booked = [b for b in user.bookings if b.status == "Booked"]
+    holding = [b for b in user.bookings if b.status in ("Booked", "Offered")]
     if any(b.class_session_id == class_row.id for b in booked):
         return {"label": "Booked", "detail": ""}
+    if class_row.start <= datetime.now():
+        return {
+            "label": "Started",
+            "detail": "This class has already started.",
+        }
     membership = active_membership(user.id)
     if membership is None or membership.end < class_row.start.date():
         return {"label": "Plan expired", "detail": ""}
@@ -81,7 +87,9 @@ def book_block(user, class_row):
             "label": "Off-peak",
             "detail": "This plan only covers classes that start before 16:00.",
         }
-    for other in booked:
+    for other in holding:
+        if other.class_session_id == class_row.id:
+            continue
         if other.session.start < class_row.end and class_row.start < other.session.end:
             return {
                 "label": "Time clash",
@@ -89,6 +97,12 @@ def book_block(user, class_row):
                     other.session.class_type.name,
                     other.session.start.strftime("%a %H:%M")),
             }
+    if any(b.class_session_id == class_row.id and b.status == "Offered" for b in holding):
+        return {
+            "label": "Offered",
+            "detail": "Confirm this place in My bookings.",
+            "action": "queued",
+        }
     if class_row.places_left <= 0:
         mine_here = [b for b in user.bookings if b.class_session_id == class_row.id]
         if any(b.status == "Waiting" for b in mine_here):
@@ -108,6 +122,11 @@ def cancel_block(booking, now=None):
     if booking.status != "Booked":
         return None
     now = now or datetime.now()
+    if now >= booking.session.start:
+        return {
+            "disabled": True,
+            "detail": "The class has started, so this cannot be cancelled.",
+        }
     inside = booking.session.start - now < timedelta(hours=2)
     if not inside:
         return {"disabled": False, "detail": ""}
@@ -147,15 +166,17 @@ def book(session_id):
             raise RuleError("That class is full.")
         if class_row.end <= datetime.now():
             raise RuleError("That class has ended.")
-        if Booking.query.filter_by(user_id=current_user.id,
-                                   class_session_id=session_id,
-                                   status="Booked").first():
+        if class_row.start <= datetime.now():
+            raise RuleError("That class has started.")
+        if Booking.query.filter(Booking.user_id == current_user.id,
+                                Booking.class_session_id == session_id,
+                                Booking.status.in_(("Booked", "Offered"))).first():
             raise RuleError("You already have this class booked.")
         for other in current_user.bookings:
-            if other.status != "Booked":
+            if other.status not in ("Booked", "Offered"):
                 continue
             if other.session.start < class_row.end and class_row.start < other.session.end:
-                raise RuleError("That overlaps another class you booked.")
+                raise RuleError("That overlaps another class you booked or were offered.")
 
         db.session.add(Booking(user_id=current_user.id,
                                class_session_id=session_id,
@@ -185,7 +206,11 @@ def cancel(booking_id):
     if booking.status != "Booked":
         flash("That booking is already cancelled.")
         return redirect(url_for("access.my_bookings"), code=303)
-    inside_cutoff = booking.session.start - datetime.now() < timedelta(hours=2)
+    now = datetime.now()
+    if now >= booking.session.start:
+        flash("The class has started, so this cannot be cancelled.")
+        return redirect(url_for("access.my_bookings"), code=303)
+    inside_cutoff = booking.session.start - now < timedelta(hours=2)
     if inside_cutoff and not booking.late_change_cancel:
         flash("Too late to cancel: the cut-off is two hours before the start.")
         return redirect(url_for("access.my_bookings"), code=303)
@@ -229,7 +254,7 @@ def _offer_next(session_id):
     class_row = db.session.get(ClassSession, session_id)
     if class_row is None:
         return False
-    if class_row.end <= datetime.now():
+    if class_row.start <= datetime.now():
         return False
     offered = False
     while held_count(session_id) < class_row.capacity:
@@ -259,10 +284,12 @@ def _eligible(class_row, membership, ignore_booking_id=None):
                             Booking.id != ignore_booking_id).first():
         raise RuleError("You already have this class booked.")
     for other in current_user.bookings:
-        if other.id == ignore_booking_id or other.status != "Booked":
+        if other.id == ignore_booking_id or other.status not in ("Booked", "Offered"):
+            continue
+        if other.class_session_id == class_row.id:
             continue
         if other.session.start < class_row.end and class_row.start < other.session.end:
-            raise RuleError("That overlaps another class you booked.")
+            raise RuleError("That overlaps another class you booked or were offered.")
 
 
 @bp.post("/classes/<int:session_id>/wait")
@@ -276,6 +303,8 @@ def wait(session_id):
             raise RuleError("That class no longer exists.")
         if class_row.end <= datetime.now():
             raise RuleError("That class has ended.")
+        if class_row.start <= datetime.now():
+            raise RuleError("That class has started.")
         if held_count(session_id) < class_row.capacity:
             raise RuleError("That class still has a place. Book it directly.")
         existing = Booking.query.filter(
@@ -309,10 +338,17 @@ def confirm(booking_id):
     booking = db.get_or_404(Booking, booking_id)
     if booking.user_id != current_user.id:
         abort(403)
-    if booking.status == "Offered" and booking.session.end <= datetime.now():
-        close_finished()
-        db.session.commit()
-        flash("That class has ended. The offer was cancelled and no class was charged.")
+    if booking.status == "Offered" and booking.session.start <= datetime.now():
+        if booking.session.end <= datetime.now():
+            close_finished()
+            db.session.commit()
+            flash("That class has ended. The offer was cancelled and no class was charged.")
+        else:
+            booking.status = "Cancelled"
+            booking.active = False
+            booking.cancelled_at = datetime.utcnow()
+            db.session.commit()
+            flash("That class has started, so this place can no longer be confirmed.")
         return redirect(url_for("access.my_bookings"), code=303)
     expire_offers()
     try:
@@ -326,6 +362,13 @@ def confirm(booking_id):
             close_finished()
             db.session.commit()
             flash("That class has ended. The offer was cancelled and no class was charged.")
+            return redirect(url_for("access.my_bookings"), code=303)
+        if class_row.start <= datetime.now():
+            booking.status = "Cancelled"
+            booking.active = False
+            booking.cancelled_at = datetime.utcnow()
+            db.session.commit()
+            flash("That class has started, so this place can no longer be confirmed.")
             return redirect(url_for("access.my_bookings"), code=303)
         membership = active_membership(current_user.id)
         try:
@@ -540,7 +583,7 @@ def rejoin(booking_id):
         flash("You are already booked or waiting for this class.")
         return redirect(url_for("access.my_bookings"), code=303)
     booking.status = "Waiting"
-    booking.booked_at = datetime.now()
+    booking.booked_at = datetime.utcnow()
     booking.offered_at = None
     booking.skip_seen = True
     booking.active = True
