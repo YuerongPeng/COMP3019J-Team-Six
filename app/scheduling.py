@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
-from sqlalchemy import text
+from sqlalchemy import or_, select, text
 from sqlalchemy.exc import OperationalError
 
 from . import db
@@ -38,8 +38,11 @@ def validate_class(class_row, existing=False, locked_member_ids=None):
 
     clashes = (ClassSession.query
                .filter(ClassSession.id != class_row.id)
+               .filter(or_(ClassSession.instructor_id == class_row.instructor_id,
+                           ClassSession.room_id == class_row.room_id))
                .filter(ClassSession.start < class_row.end)
                .filter(ClassSession.end > class_row.start)
+               .with_for_update()
                .all())
     for other in clashes:
         if other.instructor_id == class_row.instructor_id:
@@ -78,28 +81,49 @@ def _class_member_ids(session_id, locking=False):
     return [row[0] for row in query.all()]
 
 
-def _lock_members_for_time_change(class_row):
+def _current_class_member_ids(session_id):
+    """Read member ids in a separate current snapshot before taking their locks."""
+    statement = (select(Booking.user_id)
+                 .where(Booking.class_session_id == session_id,
+                        Booking.status.in_(("Booked", "Offered")))
+                 .distinct().order_by(Booking.user_id))
+    with db.engine.connect() as connection:
+        return [row[0] for row in connection.execute(statement).all()]
+
+
+def _lock_members_for_time_change(session_id):
     """Lock affected members before the class, then refresh the member set.
 
     Booking takes the same locks in the same logical order: member first, class
     second. The second query is a locking/current read, so MySQL does not reuse
     an older REPEATABLE READ snapshot after waiting for a booking to finish.
     """
-    initial_ids = _class_member_ids(class_row.id)
+    initial_ids = _current_class_member_ids(session_id)
     for user_id in initial_ids:
         lock_member_schedule(user_id)
 
-    db.session.execute(
-        text("UPDATE class_session SET capacity = capacity WHERE id = :i"),
-        {"i": class_row.id},
-    )
-    db.session.refresh(class_row)
+    class_row = db.session.execute(
+        select(ClassSession)
+        .where(ClassSession.id == session_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if class_row is None:
+        abort(404)
 
-    current_ids = _class_member_ids(class_row.id, locking=True)
-    for user_id in current_ids:
-        if user_id not in initial_ids:
-            lock_member_schedule(user_id)
-    return current_ids
+    current_ids = _class_member_ids(session_id, locking=True)
+    if current_ids != initial_ids:
+        raise RuleError(
+            "The class list changed while this schedule change was being approved. "
+            "Please try again."
+        )
+    return class_row, current_ids
+
+
+def _lock_schedule():
+    """Serialize every timetable write before checking shared resources."""
+    db.session.execute(
+        text("UPDATE schedule_lock SET id = id WHERE id = 1")
+    )
 
 
 def members_double_booked(class_row, user_ids=None, locking=False):
@@ -323,10 +347,21 @@ def cancel_proposal(proposal_id):
 def class_new():
     if request.method == "POST":
         try:
+            instructor_id = int(request.form["instructor_id"])
+            room_id = int(request.form["room_id"])
+            _lock_schedule()
+            class_type = db.session.get(ClassType, int(request.form["class_type_id"]))
+            instructor = db.session.get(Instructor, instructor_id)
+            room = db.session.get(Room, room_id)
+            if class_type is None or instructor is None or room is None:
+                raise RuleError("That class type, instructor or room no longer exists.")
             class_row = ClassSession(
-                class_type_id=int(request.form["class_type_id"]),
-                instructor_id=int(request.form["instructor_id"]),
-                room_id=int(request.form["room_id"]),
+                class_type_id=class_type.id,
+                instructor_id=instructor.id,
+                room_id=room.id,
+                class_type=class_type,
+                instructor=instructor,
+                room=room,
                 start=datetime.fromisoformat(request.form["start"]),
                 end=datetime.fromisoformat(request.form["end"]),
                 capacity=int(request.form["capacity"]),
@@ -352,16 +387,18 @@ def class_new():
 @bp.route("/admin/classes/<int:session_id>/edit", methods=["GET", "POST"])
 @staff_only
 def class_edit(session_id):
-    class_row = db.get_or_404(ClassSession, session_id)
     if request.method == "POST":
         try:
-            # Same write lock as booking. The second staff waits, then we
-            # re-read the row and refuse if it is no longer the one they opened.
-            db.session.execute(
-                text("UPDATE class_session SET capacity = capacity WHERE id = :i"),
-                {"i": session_id},
-            )
-            db.session.refresh(class_row)
+            _lock_schedule()
+            # Locking read ignores an older REPEATABLE READ snapshot after a
+            # concurrent scheduler has released the global timetable lock.
+            class_row = db.session.execute(
+                select(ClassSession)
+                .where(ClassSession.id == session_id)
+                .with_for_update()
+            ).scalar_one_or_none()
+            if class_row is None:
+                abort(404)
             if not _still_the_opened_class(class_row, request.form):
                 raise RuleError(
                     "Another staff member saved this class while this form was open. "
@@ -442,6 +479,8 @@ def class_edit(session_id):
             db.session.rollback()
             flash("The system is busy. Please try again.")
             class_row = db.session.get(ClassSession, session_id)
+    else:
+        class_row = db.get_or_404(ClassSession, session_id)
     return render_template("class_form.html", session=class_row,
                            types=ClassType.query.all(),
                            instructors=Instructor.query.all(),
@@ -563,9 +602,17 @@ def respond_to_proposal(proposal_id, action):
     proposal = db.get_or_404(ClassChangeProposal, proposal_id)
     if proposal.target_instructor.user_id != current_user.id:
         abort(403)
-    class_row = db.get_or_404(ClassSession, proposal.class_session_id)
-    locked_member_ids = _lock_members_for_time_change(class_row)
-    db.session.refresh(proposal)
+    _lock_schedule()
+    proposal = db.session.execute(
+        select(ClassChangeProposal)
+        .where(ClassChangeProposal.id == proposal_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if proposal is None:
+        abort(404)
+    class_row, locked_member_ids = _lock_members_for_time_change(
+        proposal.class_session_id
+    )
     if proposal.status != "Pending":
         flash("This change has already been decided.")
         return redirect(url_for("scheduling.my_classes"), code=303)

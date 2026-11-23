@@ -24,12 +24,57 @@ def lock_member_schedule(user_id):
     """Serialize every action that can give one member a second booked class.
 
     Instructor approval locks the same User rows before it validates a time
-    change. On MySQL this SELECT FOR UPDATE prevents a booking and an approval
-    from both checking an old schedule and committing an overlap.
+    change. The no-op UPDATE provides a current row lock on both MySQL and the
+    local SQLite test database.
     """
+    # The no-op UPDATE is a row lock on MySQL and starts the SQLite write lock.
+    # SELECT FOR UPDATE alone is ignored by SQLite, so it cannot protect the
+    # local concurrency tests.
+    db.session.execute(
+        text("UPDATE user SET status = status WHERE id = :i"),
+        {"i": user_id},
+    )
+    return db.session.get(User, user_id)
+
+
+def lock_membership(membership_id):
+    """Lock one membership card before changing or spending its credits."""
+    if membership_id is None:
+        return None
     return db.session.execute(
-        select(User).where(User.id == user_id).with_for_update()
+        select(Membership)
+        .where(Membership.id == membership_id)
+        .with_for_update()
     ).scalar_one_or_none()
+
+
+def locked_active_membership(user_id):
+    """Read the current active card after acquiring the member lock."""
+    return (Membership.query
+            .filter_by(user_id=user_id, status="active")
+            .order_by(Membership.end.desc())
+            .with_for_update()
+            .first())
+
+
+def _locked_booking(booking_id):
+    return db.session.execute(
+        select(Booking).where(Booking.id == booking_id).with_for_update()
+    ).scalar_one_or_none()
+
+
+def _member_time_conflict(user_id, class_row, ignore_booking_id=None):
+    """Another class this member already holds, including an open offer."""
+    query = (Booking.query
+             .join(ClassSession, Booking.class_session_id == ClassSession.id)
+             .filter(Booking.user_id == user_id,
+                     Booking.class_session_id != class_row.id,
+                     Booking.status.in_(("Booked", "Offered")),
+                     ClassSession.start < class_row.end,
+                     ClassSession.end > class_row.start))
+    if ignore_booking_id is not None:
+        query = query.filter(Booking.id != ignore_booking_id)
+    return query.with_for_update().first()
 
 
 def booked_count(session_id):
@@ -155,7 +200,7 @@ def book(session_id):
         if class_row is None:
             raise RuleError("That class no longer exists.")
 
-        membership = active_membership(current_user.id)
+        membership = locked_active_membership(current_user.id)
         if membership is None or membership.end < class_row.start.date():
             raise RuleError("No active membership covers that date.")
         if membership.plan.off_peak and class_row.start.hour >= 16:
@@ -168,15 +213,13 @@ def book(session_id):
             raise RuleError("That class has ended.")
         if class_row.start <= datetime.now():
             raise RuleError("That class has started.")
-        if Booking.query.filter(Booking.user_id == current_user.id,
-                                Booking.class_session_id == session_id,
-                                Booking.status.in_(("Booked", "Offered"))).first():
+        if (Booking.query.filter(Booking.user_id == current_user.id,
+                                 Booking.class_session_id == session_id,
+                                 Booking.status.in_(("Booked", "Offered")))
+                .with_for_update().first()):
             raise RuleError("You already have this class booked.")
-        for other in current_user.bookings:
-            if other.status not in ("Booked", "Offered"):
-                continue
-            if other.session.start < class_row.end and class_row.start < other.session.end:
-                raise RuleError("That overlaps another class you booked or were offered.")
+        if _member_time_conflict(current_user.id, class_row):
+            raise RuleError("That overlaps another class you booked or were offered.")
 
         db.session.add(Booking(user_id=current_user.id,
                                class_session_id=session_id,
@@ -200,33 +243,48 @@ def book(session_id):
 @bp.post("/bookings/<int:booking_id>/cancel")
 @login_required
 def cancel(booking_id):
-    booking = db.get_or_404(Booking, booking_id)
-    if booking.user_id != current_user.id:
-        abort(403)
-    if booking.status != "Booked":
-        flash("That booking is already cancelled.")
-        return redirect(url_for("access.my_bookings"), code=303)
-    now = datetime.now()
-    if now >= booking.session.start:
-        flash("The class has started, so this cannot be cancelled.")
-        return redirect(url_for("access.my_bookings"), code=303)
-    inside_cutoff = booking.session.start - now < timedelta(hours=2)
-    if inside_cutoff and not booking.late_change_cancel:
-        flash("Too late to cancel: the cut-off is two hours before the start.")
-        return redirect(url_for("access.my_bookings"), code=303)
-
-    db.session.execute(text("UPDATE class_session SET capacity = capacity WHERE id = :i"),
-                       {"i": booking.class_session_id})
-    booking.status = "Cancelled"
-    booking.active = False
-    booking.late_change_cancel = False
-    booking.cancelled_at = datetime.utcnow()
-    membership = db.session.get(Membership, booking.membership_id)
-    if membership is not None and membership.credits_remaining is not None:
-        membership.credits_remaining += 1
-    offered = _offer_next(booking.class_session_id)
     try:
+        booking = db.get_or_404(Booking, booking_id)
+        if booking.user_id != current_user.id:
+            abort(403)
+        lock_member_schedule(current_user.id)
+        _lock_class(booking.class_session_id)
+        class_row = db.session.execute(
+            select(ClassSession)
+            .where(ClassSession.id == booking.class_session_id)
+            .with_for_update()
+        ).scalar_one_or_none()
+        if class_row is None:
+            abort(404)
+        if datetime.now() >= class_row.start:
+            raise RuleError("The class has started, so this cannot be cancelled.")
+        inside_cutoff = class_row.start - datetime.now() < timedelta(hours=2)
+        cancellation = Booking.query.filter(
+            Booking.id == booking_id, Booking.status == "Booked")
+        if inside_cutoff:
+            cancellation = cancellation.filter(
+                Booking.late_change_cancel.is_(True))
+        changed = cancellation.update({
+            Booking.status: "Cancelled",
+            Booking.active: False,
+            Booking.late_change_cancel: False,
+            Booking.cancelled_at: datetime.utcnow(),
+        }, synchronize_session=False)
+        if changed != 1:
+            if inside_cutoff:
+                raise RuleError(
+                    "Too late to cancel, or this booking was already cancelled."
+                )
+            raise RuleError("That booking is already cancelled.")
+        membership = lock_membership(booking.membership_id)
+        if membership is not None and membership.credits_remaining is not None:
+            membership.credits_remaining += 1
+        offered = _offer_next(booking.class_session_id)
         db.session.commit()
+    except RuleError as exc:
+        db.session.rollback()
+        flash(str(exc))
+        return redirect(url_for("access.my_bookings"), code=303)
     except OperationalError:
         db.session.rollback()
         flash("The system is busy. Please try again.")
@@ -278,18 +336,16 @@ def _eligible(class_row, membership, ignore_booking_id=None):
         raise RuleError("This plan covers off-peak classes only.")
     if membership.credits_remaining is not None and membership.credits_remaining <= 0:
         raise RuleError("No credits left on this plan.")
-    if Booking.query.filter(Booking.user_id == current_user.id,
-                            Booking.class_session_id == class_row.id,
-                            Booking.status == "Booked",
-                            Booking.id != ignore_booking_id).first():
+    duplicate = (Booking.query
+                 .filter(Booking.user_id == current_user.id,
+                         Booking.class_session_id == class_row.id,
+                         Booking.status.in_(("Booked", "Offered"))))
+    if ignore_booking_id is not None:
+        duplicate = duplicate.filter(Booking.id != ignore_booking_id)
+    if duplicate.with_for_update().first():
         raise RuleError("You already have this class booked.")
-    for other in current_user.bookings:
-        if other.id == ignore_booking_id or other.status not in ("Booked", "Offered"):
-            continue
-        if other.class_session_id == class_row.id:
-            continue
-        if other.session.start < class_row.end and class_row.start < other.session.end:
-            raise RuleError("That overlaps another class you booked or were offered.")
+    if _member_time_conflict(current_user.id, class_row, ignore_booking_id):
+        raise RuleError("That overlaps another class you booked or were offered.")
 
 
 @bp.post("/classes/<int:session_id>/wait")
@@ -297,6 +353,7 @@ def _eligible(class_row, membership, ignore_booking_id=None):
 def wait(session_id):
     _require_member()
     try:
+        lock_member_schedule(current_user.id)
         _lock_class(session_id)
         class_row = db.session.get(ClassSession, session_id)
         if class_row is None:
@@ -313,7 +370,7 @@ def wait(session_id):
             Booking.status.in_(("Booked", "Waiting", "Offered"))).first()
         if existing:
             raise RuleError("You are already booked or waiting for this class.")
-        membership = active_membership(current_user.id)
+        membership = locked_active_membership(current_user.id)
         _eligible(class_row, membership)
         db.session.add(Booking(user_id=current_user.id,
                                class_session_id=session_id,
@@ -335,26 +392,16 @@ def wait(session_id):
 @login_required
 def confirm(booking_id):
     _require_member()
-    booking = db.get_or_404(Booking, booking_id)
-    if booking.user_id != current_user.id:
-        abort(403)
-    if booking.status == "Offered" and booking.session.start <= datetime.now():
-        if booking.session.end <= datetime.now():
-            close_finished()
-            db.session.commit()
-            flash("That class has ended. The offer was cancelled and no class was charged.")
-        else:
-            booking.status = "Cancelled"
-            booking.active = False
-            booking.cancelled_at = datetime.utcnow()
-            db.session.commit()
-            flash("That class has started, so this place can no longer be confirmed.")
-        return redirect(url_for("access.my_bookings"), code=303)
     expire_offers()
     try:
         lock_member_schedule(current_user.id)
+        booking = _locked_booking(booking_id)
+        if booking is None:
+            abort(404)
+        if booking.user_id != current_user.id:
+            abort(403)
         _lock_class(booking.class_session_id)
-        db.session.refresh(booking)
+        booking = _locked_booking(booking_id)
         if booking.status != "Offered":
             raise RuleError("That place is no longer offered to you.")
         class_row = booking.session
@@ -370,7 +417,7 @@ def confirm(booking_id):
             db.session.commit()
             flash("That class has started, so this place can no longer be confirmed.")
             return redirect(url_for("access.my_bookings"), code=303)
-        membership = active_membership(current_user.id)
+        membership = locked_active_membership(current_user.id)
         try:
             _eligible(class_row, membership, ignore_booking_id=booking.id)
         except RuleError as exc:

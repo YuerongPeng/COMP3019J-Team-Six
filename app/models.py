@@ -193,6 +193,11 @@ class ClassSession(db.Model):
         return self.capacity - held
 
 
+class ScheduleLock(db.Model):
+    """The single row that serializes timetable writes across all classes."""
+    id = db.Column(db.Integer, primary_key=True)
+
+
 class Booking(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
