@@ -14,7 +14,7 @@ and membership plans for Northbank Fitness Centre.
 - **Member** - browse the timetable, book and cancel classes, see only their own bookings.
 - **Staff** - create and edit classes, read the roster, maintain membership plans.
 - **Visitor** - browse only.
-- **Instructor** - never logs in; staff maintain their experience as data.
+- **Instructor** - signs in through an account linked by staff to exactly one instructor record; sees assigned classes and rosters, requests cover, and approves proposed schedule changes.
 
 ## Stack
 
@@ -39,6 +39,9 @@ Seeded accounts, password `password`:
 | alex@example.com | member, monthly unlimited |
 | mei@example.com | member, ten-visit pack |
 | staff@example.com | staff, no plan |
+| maya@example.com | instructor, Maya Lin |
+| quinn@example.com | instructor, Quinn He |
+| rob@example.com | instructor, Rob Diaz |
 
 The seed includes one class at 13 of 14 places, so the "two members, one place"
 demonstration has a target.
@@ -49,7 +52,7 @@ demonstration has a target.
 config.py              Config (SECRET_KEY, DATABASE_URL)
 run.py                 create_app() and the dev server
 app/__init__.py        application factory, blueprints, error pages, `seed` command
-app/models.py          the nine records
+app/models.py          users, classes, bookings and approval records
 app/access.py          role checks and every page          (Yang)
 app/booking.py         the only writer of Booked rows      (Ma)
 app/scheduling.py      class create/edit, roster, plans    (Peng)
@@ -77,6 +80,11 @@ templates/ static/     the pages and the theme
 | GET, POST | `/admin/classes/new` | staff | create a class |
 | GET, POST | `/admin/classes/<id>/edit` | staff | same class id |
 | GET | `/admin/classes/<id>/roster` | staff | who is still booked |
+| GET, POST | `/admin/instructors/accounts` | staff | create and link an instructor login |
+| GET | `/admin/change-requests` | staff | review cover requests and pending schedule changes |
+| GET | `/instructor/classes` | instructor | own upcoming classes, rosters, and pending proposals |
+| POST | `/classes/<id>/cannot-teach` | assigned instructor | ask staff to arrange cover |
+| POST | `/instructor/proposals/<id>/<accept\|decline>` | proposed instructor | decide a staff schedule change |
 | GET, POST | `/admin/plans` | staff | plans and memberships |
 
 ## Rules in place
@@ -90,11 +98,15 @@ templates/ static/     the pages and the theme
 5. **Edit keeps identity** - a class edit updates the same row, so bookings stay
    attached; capacity may not fall below the number already booked.
 
-6. **Edits cannot double-book a member** - a class edit may change the time, the
+6. **Instructor approval** - changes to a class's instructor, time or room are staged
+   for the newly assigned instructor. Members and the timetable continue to see the
+   current class until that instructor accepts; declining leaves it unchanged.
+
+7. **Edits cannot double-book a member** - a class edit may change the time, the
    instructor, the room or the capacity, but it is refused when a member already
    booked on that class would end up in two classes at once.
 
-7. **Account and membership** - a member registers their own account, changes their
+8. **Account and membership** - a member registers their own account, changes their
    own password, renews the current plan in place (end extends from the current end,
    credits refill to the limit, no second card) or switches to another plan (the old
    card is marked "replaced", a new card starts today with the new plan's allowance,
@@ -106,8 +118,10 @@ templates/ static/     the pages and the theme
 ## Tests
 
 ```bash
-python tests/smoke_test.py        # 22 checks over routes, roles and rules
-python tests/edit_clash_test.py   # 5 checks focused on the class-edit clash
+python tests/smoke_test.py        # 48 checks over routes, roles and rules
+python tests/edit_clash_test.py   # 6 checks focused on the class-edit clash
+python tests/instructor_workflow_test.py  # instructor roles and schedule approvals
+python tests/approval_booking_concurrency_test.py  # approval vs booking race
 ```
 
 ## Still to do

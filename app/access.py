@@ -147,7 +147,7 @@ def logout():
 @bp.get("/my-bookings")
 @login_required
 def my_bookings():
-    if current_user.role == "staff":
+    if current_user.role != "member":
         abort(403)
     from .booking import cancel_block, close_finished, expire_offers, open_offers, seconds_left
     close_finished()

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}{{ heading }}{% endblock %}
+{% block title %}{{ "Class list" if back_to_my_classes else heading }}{% endblock %}
 {% block content %}
-<h1>{{ heading }} · {{ session.class_type.name }}</h1>
+<h1>{{ "Class list" if back_to_my_classes else heading }} · {{ session.class_type.name }}</h1>
 <p>{{ session.start.strftime("%a %d %b, %H:%M") }}–{{ session.end.strftime("%H:%M") }} · {{ session.instructor.name }} · {{ session.room.name }}</p>
 {% if not ended %}
 <p class="hint">Attendance can be recorded after the class ends.</p>
@@ -47,5 +47,9 @@
   {% endfor %}
   </tbody>
 </table>
+{% if back_to_my_classes %}
+<p><a class="btn ghost" href="{{ url_for('scheduling.my_classes') }}">Back to my classes</a></p>
+{% else %}
 <p><a href="{{ url_for('access.class_detail', session_id=session.id) }}">Back to the class</a></p>
+{% endif %}
 {% endblock %}

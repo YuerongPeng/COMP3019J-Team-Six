@@ -41,7 +41,11 @@ def seed():
                password_hash=generate_password_hash("password"))
     maya_user = User(name="Maya Lin", email="maya@example.com", role="instructor",
                      password_hash=generate_password_hash("password"))
-    db.session.add_all([staff, alex, mei, maya_user])
+    quinn_user = User(name="Quinn He", email="quinn@example.com", role="instructor",
+                      password_hash=generate_password_hash("password"))
+    rob_user = User(name="Rob Diaz", email="rob@example.com", role="instructor",
+                    password_hash=generate_password_hash("password"))
+    db.session.add_all([staff, alex, mei, maya_user, quinn_user, rob_user])
     db.session.flush()
 
     db.session.add_all([
@@ -52,8 +56,8 @@ def seed():
     ])
 
     maya = Instructor(name="Maya Lin", profile="Yoga and mobility", user_id=maya_user.id)
-    quinn = Instructor(name="Quinn He", profile="Yoga and cycling")
-    rob = Instructor(name="Rob Diaz", profile="Strength")
+    quinn = Instructor(name="Quinn He", profile="Yoga and cycling", user_id=quinn_user.id)
+    rob = Instructor(name="Rob Diaz", profile="Strength", user_id=rob_user.id)
     db.session.add_all([maya, quinn, rob])
     db.session.flush()
 

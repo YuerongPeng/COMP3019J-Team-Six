@@ -16,7 +16,8 @@ sys.path.insert(0, ROOT)
 from datetime import datetime, timedelta  # noqa: E402
 
 from app import create_app, db  # noqa: E402
-from app.models import Booking, ClassSession, Membership, User  # noqa: E402
+from app.models import (Booking, ClassChangeProposal, ClassSession, Membership,
+                        User)  # noqa: E402
 from app.seed import seed  # noqa: E402
 
 DB = os.path.join(HERE, "smoke.db")
@@ -169,6 +170,21 @@ r = client.post("/admin/classes/%d/edit" % move_id,
 check("legal move accepted",
       r.status_code == 200 and "two classes" not in r.get_data(as_text=True).lower(),
       str(r.status_code))
+
+with app.app_context():
+    proposal = ClassChangeProposal.query.filter_by(
+        class_session_id=move_id, status="Pending").first()
+    proposal_id = proposal.id
+    approver_email = proposal.target_instructor.user.email
+
+r = client.post("/logout")
+r = client.post("/login", data={"email": approver_email, "password": "password"})
+r = client.post("/instructor/proposals/%d/accept" % proposal_id,
+                follow_redirects=True)
+check("instructor accepts the legal move",
+      "change accepted" in r.get_data(as_text=True).lower(), "no acceptance")
+r = client.post("/logout")
+r = client.post("/login", data={"email": "staff@example.com", "password": "password"})
 
 with app.app_context():
     moved = db.session.get(ClassSession, move_id)

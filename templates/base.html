@@ -14,7 +14,11 @@
     {% if current_user.is_authenticated %}
       {% if current_user.role == 'staff' %}
         <a href="{{ url_for('scheduling.class_list') }}">Manage classes</a>
+        <a href="{{ url_for('scheduling.change_requests') }}">Change requests</a>
+        <a href="{{ url_for('scheduling.instructor_accounts') }}">Instructor accounts</a>
         <a href="{{ url_for('scheduling.plans') }}">Plans</a>
+      {% elif current_user.role == 'instructor' %}
+        <a href="{{ url_for('scheduling.my_classes') }}">My classes</a>
       {% elif current_user.role != 'instructor' %}
         <a href="{{ url_for('access.my_bookings') }}">My bookings</a>
         <a href="{{ url_for('membership.account') }}">My plan</a>

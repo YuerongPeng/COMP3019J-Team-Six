@@ -42,12 +42,7 @@ def _ensure_booking_columns(app):
 
 
 def _ensure_instructor_account(app):
-    """Link Maya Lin to a login so she can record attendance on her own classes.
-
-    Existing databases were created before instructors could sign in. This adds
-    the column and the one demo account. It does not build the rest of the
-    instructor area.
-    """
+    """Migrate instructor links and create new workflow tables if needed."""
     with app.app_context():
         try:
             insp = inspect(db.engine)
@@ -60,8 +55,26 @@ def _ensure_instructor_account(app):
             db.session.execute(text("ALTER TABLE instructor ADD COLUMN user_id INTEGER"))
             db.session.commit()
         from werkzeug.security import generate_password_hash
-
         from .models import Instructor, User
+        db.create_all()
+        insp = inspect(db.engine)
+        unique_user_link = any(
+            set(item.get("column_names") or []) == {"user_id"}
+            for item in insp.get_unique_constraints("instructor")
+        ) or any(
+            item.get("unique") and set(item.get("column_names") or []) == {"user_id"}
+            for item in insp.get_indexes("instructor")
+        )
+        if not unique_user_link:
+            duplicate = db.session.execute(text(
+                "SELECT user_id FROM instructor WHERE user_id IS NOT NULL "
+                "GROUP BY user_id HAVING COUNT(*) > 1 LIMIT 1"
+            )).first()
+            if duplicate is None:
+                db.session.execute(text(
+                    "CREATE UNIQUE INDEX uq_instructor_user_id ON instructor (user_id)"
+                ))
+                db.session.commit()
         maya = Instructor.query.filter_by(name="Maya Lin").first()
         if maya is None or maya.user_id is not None:
             return

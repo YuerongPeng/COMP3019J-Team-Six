@@ -95,6 +95,51 @@ class Instructor(db.Model):
     user = db.relationship("User")
 
 
+class ClassChangeProposal(db.Model):
+    """A staff edit that remains invisible until its target instructor agrees."""
+    id = db.Column(db.Integer, primary_key=True)
+    class_session_id = db.Column(db.Integer, db.ForeignKey("class_session.id"), nullable=False, index=True)
+    submitted_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    target_instructor_id = db.Column(db.Integer, db.ForeignKey("instructor.id"), nullable=False)
+    class_type_id = db.Column(db.Integer, db.ForeignKey("class_type.id"), nullable=False)
+    instructor_id = db.Column(db.Integer, db.ForeignKey("instructor.id"), nullable=False)
+    room_id = db.Column(db.Integer, db.ForeignKey("room.id"), nullable=False)
+    start = db.Column(db.DateTime, nullable=False)
+    end = db.Column(db.DateTime, nullable=False)
+    capacity = db.Column(db.Integer, nullable=False)
+    base_instructor_id = db.Column(db.Integer, nullable=False)
+    base_room_id = db.Column(db.Integer, nullable=False)
+    base_start = db.Column(db.DateTime, nullable=False)
+    base_end = db.Column(db.DateTime, nullable=False)
+    status = db.Column(db.String(12), nullable=False, default="Pending")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    decided_at = db.Column(db.DateTime)
+    decision_note = db.Column(db.String(255))
+
+    session = db.relationship("ClassSession")
+    target_instructor = db.relationship("Instructor", foreign_keys=[target_instructor_id])
+    instructor = db.relationship("Instructor", foreign_keys=[instructor_id])
+    class_type = db.relationship("ClassType")
+    room = db.relationship("Room")
+    submitted_by = db.relationship("User")
+
+
+class InstructorAbsenceRequest(db.Model):
+    """An instructor's request for staff to arrange cover for one class."""
+    id = db.Column(db.Integer, primary_key=True)
+    class_session_id = db.Column(db.Integer, db.ForeignKey("class_session.id"), nullable=False, index=True)
+    instructor_id = db.Column(db.Integer, db.ForeignKey("instructor.id"), nullable=False)
+    requested_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    reason = db.Column(db.String(255))
+    status = db.Column(db.String(12), nullable=False, default="Pending")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    resolved_at = db.Column(db.DateTime)
+
+    session = db.relationship("ClassSession")
+    instructor = db.relationship("Instructor")
+    requested_by = db.relationship("User")
+
+
 class InstructorSkill(db.Model):
     instructor_id = db.Column(db.Integer, db.ForeignKey("instructor.id"), primary_key=True)
     class_type_id = db.Column(db.Integer, db.ForeignKey("class_type.id"), primary_key=True)

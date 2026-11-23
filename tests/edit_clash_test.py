@@ -13,7 +13,7 @@ sys.path.insert(0, ROOT)
 from datetime import timedelta  # noqa: E402
 
 from app import create_app, db  # noqa: E402
-from app.models import ClassSession  # noqa: E402
+from app.models import ClassChangeProposal, ClassSession  # noqa: E402
 from app.seed import seed  # noqa: E402
 
 DB = os.path.join(HERE, "edit_clash.db")
@@ -97,6 +97,19 @@ r = client.post("/admin/classes/%d/edit" % yoga_id, data=data, follow_redirects=
 body = r.get_data(as_text=True).lower()
 check("move to a free hour allowed", r.status_code == 200 and "two classes" not in body,
       str(r.status_code))
+
+with app.app_context():
+    proposal = ClassChangeProposal.query.filter_by(
+        class_session_id=yoga_id, status="Pending").first()
+    proposal_id = proposal.id
+    approver_email = proposal.target_instructor.user.email
+
+client.post("/logout")
+client.post("/login", data={"email": approver_email, "password": "password"})
+r = client.post("/instructor/proposals/%d/accept" % proposal_id,
+                follow_redirects=True)
+check("instructor accepts the legal move",
+      "change accepted" in r.get_data(as_text=True).lower(), "no acceptance")
 
 with app.app_context():
     row = db.session.get(ClassSession, yoga_id)

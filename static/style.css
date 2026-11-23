@@ -329,6 +329,13 @@ input:focus, select:focus, textarea:focus {
   padding: 7px 14px;
 }
 .btn.ghost:hover { background: #F4F4F4; }
+.inline-form { display: inline; margin: 0; }
+button.secondary {
+  background: #F1F1F1;
+  border-color: var(--line);
+  color: var(--ink);
+}
+button.secondary:hover { background: #E8E8E8; }
 
 /* disabled button with a tooltip reason (tap / hover / focus) */
 button.disabled {
