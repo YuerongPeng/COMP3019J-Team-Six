@@ -55,8 +55,11 @@ def _ensure_instructor_account(app):
             db.session.execute(text("ALTER TABLE instructor ADD COLUMN user_id INTEGER"))
             db.session.commit()
         from werkzeug.security import generate_password_hash
-        from .models import Instructor, User
+        from .models import Instructor, ScheduleLock, User
         db.create_all()
+        if db.session.get(ScheduleLock, 1) is None:
+            db.session.add(ScheduleLock(id=1))
+            db.session.commit()
         insp = inspect(db.engine)
         unique_user_link = any(
             set(item.get("column_names") or []) == {"user_id"}

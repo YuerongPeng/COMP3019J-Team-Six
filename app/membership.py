@@ -12,6 +12,7 @@ from flask_login import current_user, login_required, login_user
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import db
+from .booking import lock_member_schedule
 from .models import Membership, MembershipPlan, PlanChange, User
 
 bp = Blueprint("membership", __name__)
@@ -31,11 +32,13 @@ def _renewal_end(current_end, plan):
     return base + timedelta(days=plan.duration_days)
 
 
-def active_card(user_id):
-    return (Membership.query
-            .filter_by(user_id=user_id, status="active")
-            .order_by(Membership.start.desc())
-            .first())
+def active_card(user_id, locking=False):
+    query = (Membership.query
+             .filter_by(user_id=user_id, status="active")
+             .order_by(Membership.start.desc()))
+    if locking:
+        query = query.with_for_update()
+    return query.first()
 
 
 # --------------------------------------------------------------------------
@@ -119,7 +122,8 @@ def account():
 def renew():
     if current_user.role != "member":
         abort(403)
-    card = active_card(current_user.id)
+    lock_member_schedule(current_user.id)
+    card = active_card(current_user.id, locking=True)
     if card is None:
         flash("You have no active plan yet. Subscribe first.")
         return redirect(url_for("membership.account"), code=303)
@@ -131,12 +135,13 @@ def renew():
 def switch_plan():
     if current_user.role != "member":
         abort(403)
+    lock_member_schedule(current_user.id)
     plan_id = request.form.get("plan_id", type=int)
     plan = db.session.get(MembershipPlan, plan_id) if plan_id else None
     if plan is None:
         flash("Please choose a plan.")
         return redirect(url_for("membership.account"), code=303)
-    card = active_card(current_user.id)
+    card = active_card(current_user.id, locking=True)
     if card is None:
         return _open_new_membership(plan, None)
     if plan.id == card.plan_id:

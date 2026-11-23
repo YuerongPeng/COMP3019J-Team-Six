@@ -12,7 +12,7 @@ from werkzeug.security import generate_password_hash
 
 from . import db
 from .models import (Booking, ClassSession, ClassType, Instructor, InstructorSkill,
-                     Membership, MembershipPlan, Room, User)
+                     Membership, MembershipPlan, Room, ScheduleLock, User)
 
 
 def soon(days, hour):
@@ -24,6 +24,8 @@ def seed():
     """Populate the database. Safe to call once per database."""
     if User.query.first() is not None:
         return 0
+
+    db.session.add(ScheduleLock(id=1))
 
     plans = [
         MembershipPlan(name="Monthly unlimited", duration_days=30, credit_limit=None, off_peak=False),

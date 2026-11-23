@@ -122,6 +122,8 @@ python tests/smoke_test.py        # 48 checks over routes, roles and rules
 python tests/edit_clash_test.py   # 6 checks focused on the class-edit clash
 python tests/instructor_workflow_test.py  # instructor roles and schedule approvals
 python tests/approval_booking_concurrency_test.py  # approval vs booking race
+python tests/schedule_resource_concurrency_test.py  # room/instructor race
+python tests/membership_concurrency_test.py  # renew/switch races
 ```
 
 ## Still to do
