@@ -8,16 +8,28 @@ from datetime import datetime, timedelta
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
-from sqlalchemy import func, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import OperationalError
 
 from . import db
 from .access import RuleError, active_membership
-from .models import Booking, ClassSession, Membership
+from .models import Booking, ClassSession, Membership, User
 
 bp = Blueprint("booking", __name__)
 
 OFFER_MINUTES = 30
+
+
+def lock_member_schedule(user_id):
+    """Serialize every action that can give one member a second booked class.
+
+    Instructor approval locks the same User rows before it validates a time
+    change. On MySQL this SELECT FOR UPDATE prevents a booking and an approval
+    from both checking an old schedule and committing an overlap.
+    """
+    return db.session.execute(
+        select(User).where(User.id == user_id).with_for_update()
+    ).scalar_one_or_none()
 
 
 def booked_count(session_id):
@@ -114,6 +126,7 @@ def cancel_block(booking, now=None):
 @login_required
 def book(session_id):
     try:
+        lock_member_schedule(current_user.id)
         # One transaction. SQLite takes the write lock when the row is touched;
         # on MySQL this is the place for SELECT ... FOR UPDATE.
         db.session.execute(text("UPDATE class_session SET capacity = capacity WHERE id = :i"),
@@ -303,6 +316,7 @@ def confirm(booking_id):
         return redirect(url_for("access.my_bookings"), code=303)
     expire_offers()
     try:
+        lock_member_schedule(current_user.id)
         _lock_class(booking.class_session_id)
         db.session.refresh(booking)
         if booking.status != "Offered":

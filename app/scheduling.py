@@ -13,7 +13,8 @@ from sqlalchemy.exc import OperationalError
 
 from . import db
 from .access import RuleError, staff_only
-from .booking import attendance_list, held_count, record_attendance
+from .booking import (attendance_list, held_count, lock_member_schedule,
+                      record_attendance)
 from .models import (Booking, ClassChangeProposal, ClassSession, ClassType,
                      Instructor, InstructorAbsenceRequest, Membership,
                      MembershipPlan, Room, User)
@@ -21,7 +22,7 @@ from .models import (Booking, ClassChangeProposal, ClassSession, ClassType,
 bp = Blueprint("scheduling", __name__)
 
 
-def validate_class(class_row, existing=False):
+def validate_class(class_row, existing=False, locked_member_ids=None):
     if not any(s.class_type_id == class_row.class_type_id
                for s in class_row.instructor.skills):
         raise RuleError("That instructor cannot teach this class type.")
@@ -54,26 +55,69 @@ def validate_class(class_row, existing=False):
                 "Remove bookings first, or cancel the class." % taken)
         # A change to the time, instructor or room must not leave a member in two
         # classes at once, and must not overload an instructor or a room.
-        clashing = members_double_booked(class_row)
+        clashing = members_double_booked(
+            class_row,
+            user_ids=locked_member_ids,
+            locking=locked_member_ids is not None,
+        )
         if clashing:
             raise RuleError(
                 "That time would put %d booked member(s) in two classes at once. "
                 "Nothing was written." % clashing)
 
 
-def members_double_booked(class_row):
+def _class_member_ids(session_id, locking=False):
+    """Current members whose place must follow a schedule change."""
+    query = (db.session.query(Booking.user_id)
+             .filter(Booking.class_session_id == session_id,
+                     Booking.status.in_(("Booked", "Offered")))
+             .distinct()
+             .order_by(Booking.user_id))
+    if locking:
+        query = query.with_for_update()
+    return [row[0] for row in query.all()]
+
+
+def _lock_members_for_time_change(class_row):
+    """Lock affected members before the class, then refresh the member set.
+
+    Booking takes the same locks in the same logical order: member first, class
+    second. The second query is a locking/current read, so MySQL does not reuse
+    an older REPEATABLE READ snapshot after waiting for a booking to finish.
+    """
+    initial_ids = _class_member_ids(class_row.id)
+    for user_id in initial_ids:
+        lock_member_schedule(user_id)
+
+    db.session.execute(
+        text("UPDATE class_session SET capacity = capacity WHERE id = :i"),
+        {"i": class_row.id},
+    )
+    db.session.refresh(class_row)
+
+    current_ids = _class_member_ids(class_row.id, locking=True)
+    for user_id in current_ids:
+        if user_id not in initial_ids:
+            lock_member_schedule(user_id)
+    return current_ids
+
+
+def members_double_booked(class_row, user_ids=None, locking=False):
     """How many members already booked here would clash with another booking."""
     affected = set()
-    bookings = Booking.query.filter_by(class_session_id=class_row.id).all()
-    for booking in bookings:
-        if booking.status not in ("Booked", "Offered"):
-            continue
-        for other in booking.user.bookings:
-            if other.status not in ("Booked", "Offered") or other.class_session_id == class_row.id:
-                continue
-            if other.session.start < class_row.end and class_row.start < other.session.end:
-                affected.add(booking.user_id)
-                break
+    user_ids = user_ids if user_ids is not None else _class_member_ids(class_row.id)
+    for user_id in user_ids:
+        query = (Booking.query
+                 .join(ClassSession, Booking.class_session_id == ClassSession.id)
+                 .filter(Booking.user_id == user_id,
+                         Booking.class_session_id != class_row.id,
+                         Booking.status.in_(("Booked", "Offered")),
+                         ClassSession.start < class_row.end,
+                         ClassSession.end > class_row.start))
+        if locking:
+            query = query.with_for_update()
+        if query.first() is not None:
+            affected.add(user_id)
     return len(affected)
 
 
@@ -324,11 +368,13 @@ def class_edit(session_id):
             proposed_room_id = int(request.form["room_id"])
             proposed_start = datetime.fromisoformat(request.form["start"])
             proposed_end = datetime.fromisoformat(request.form["end"])
+            current_start = class_row.start.replace(second=0, microsecond=0)
+            current_end = class_row.end.replace(second=0, microsecond=0)
             needs_approval = (
                 proposed_instructor_id != class_row.instructor_id
                 or proposed_room_id != class_row.room_id
-                or proposed_start != class_row.start
-                or proposed_end != class_row.end
+                or proposed_start != current_start
+                or proposed_end != current_end
             )
             if needs_approval:
                 candidate = _proposal_candidate(class_row, request.form)
@@ -508,10 +554,7 @@ def respond_to_proposal(proposal_id, action):
     if proposal.target_instructor.user_id != current_user.id:
         abort(403)
     class_row = db.get_or_404(ClassSession, proposal.class_session_id)
-    db.session.execute(
-        text("UPDATE class_session SET capacity = capacity WHERE id = :i"),
-        {"i": class_row.id},
-    )
+    locked_member_ids = _lock_members_for_time_change(class_row)
     db.session.refresh(proposal)
     if proposal.status != "Pending":
         flash("This change has already been decided.")
@@ -538,7 +581,8 @@ def respond_to_proposal(proposal_id, action):
         class_row.start = proposal.start
         class_row.end = proposal.end
         class_row.capacity = proposal.capacity
-        validate_class(class_row, existing=True)
+        validate_class(class_row, existing=True,
+                       locked_member_ids=locked_member_ids)
         _keep_cancel_open(class_row, previous_start)
         if class_row.start != previous_start:
             _drop_clashing_waiters(class_row)
