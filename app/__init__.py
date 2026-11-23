@@ -91,6 +91,32 @@ def _ensure_instructor_account(app):
         db.session.commit()
 
 
+def _ensure_maya_pilates_skill(app):
+    """The seeded Pilates class is taught by Maya, so she needs that skill.
+
+    Older databases inserted the class without the skill. Saving it was then
+    refused. New databases get the skill from seed(); this repairs the old ones.
+    """
+    with app.app_context():
+        try:
+            insp = inspect(db.engine)
+        except Exception:
+            return
+        if not insp.has_table("instructor_skill") or not insp.has_table("class_type"):
+            return
+        from .models import ClassType, Instructor, InstructorSkill
+        maya = Instructor.query.filter_by(name="Maya Lin").first()
+        pilates = ClassType.query.filter_by(name="Pilates").first()
+        if maya is None or pilates is None:
+            return
+        exists = InstructorSkill.query.filter_by(
+            instructor_id=maya.id, class_type_id=pilates.id).first()
+        if exists is not None:
+            return
+        db.session.add(InstructorSkill(instructor_id=maya.id, class_type_id=pilates.id))
+        db.session.commit()
+
+
 def create_app(config_object="config.Config"):
     app = Flask(__name__, instance_relative_config=True,
                 template_folder=os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates"),
@@ -102,6 +128,7 @@ def create_app(config_object="config.Config"):
     db.init_app(app)
     _ensure_booking_columns(app)
     _ensure_instructor_account(app)
+    _ensure_maya_pilates_skill(app)
     login_manager.init_app(app)
     login_manager.login_view = "access.login"
     login_manager.login_message = "Please sign in to continue."

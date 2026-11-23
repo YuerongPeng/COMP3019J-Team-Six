@@ -67,6 +67,12 @@ with app.app_context():
     db.create_all()
     rows = seed()
     check("seed loads 15 rows", rows == 15, "seed()=%s" % rows)
+    from app.models import ClassType, Instructor, InstructorSkill
+    maya = Instructor.query.filter_by(name="Maya Lin").first()
+    pilates = ClassType.query.filter_by(name="Pilates").first()
+    skill = InstructorSkill.query.filter_by(
+        instructor_id=maya.id, class_type_id=pilates.id).first()
+    check("seed lets Maya teach Pilates", skill is not None)
 
 client = app.test_client()
 
@@ -353,6 +359,148 @@ with app.app_context():
     check("a non-time save keeps the started class time",
           moved.capacity == kept_capacity - 1 and same_time,
           "capacity=%s start=%s" % (moved.capacity, moved.start.strftime("%Y-%m-%d %H:%M")))
+
+# --------------------------------------- late time change ends at the start
+with app.app_context():
+    from app.booking import cancel_block
+    mei = User.query.filter_by(email="mei@example.com").first()
+    late = Booking.query.filter_by(user_id=mei.id, class_session_id=target_id, status="Booked").first()
+    late.late_change_cancel = True
+    late_id = late.id
+    late_credits = late.membership.credits_remaining
+    started = late.session.start
+    check("late time change still allows cancel before the start",
+          cancel_block(late, started - timedelta(minutes=30))["disabled"] is False)
+    check("late time change blocks cancel once the class has started",
+          cancel_block(late, started + timedelta(minutes=1))["disabled"] is True)
+    late.session.start = datetime.now() - timedelta(minutes=30)
+    late.session.end = datetime.now() + timedelta(minutes=30)
+    db.session.commit()
+
+r = client.post("/logout")
+r = client.post("/login", data={"email": "mei@example.com", "password": "password"})
+r = client.post("/bookings/%d/cancel" % late_id, follow_redirects=True)
+check("cancel after the start is refused",
+      "has started" in r.get_data(as_text=True).lower(), r.get_data(as_text=True)[:180])
+with app.app_context():
+    kept = db.session.get(Booking, late_id)
+    check("booking stays booked after the refused cancel", kept.status == "Booked", kept.status)
+    check("no credit is returned after the class has started",
+          kept.membership.credits_remaining == late_credits,
+          str(kept.membership.credits_remaining))
+
+# ------------------------- a class in progress cannot be booked or queued
+with app.app_context():
+    sample = ClassSession.query.filter(ClassSession.start > datetime.now()).first()
+    live = ClassSession(
+        class_type_id=sample.class_type_id,
+        instructor_id=sample.instructor_id,
+        room_id=sample.room_id,
+        start=datetime.now() - timedelta(minutes=20),
+        end=datetime.now() + timedelta(minutes=40),
+        capacity=8,
+    )
+    db.session.add(live)
+    db.session.commit()
+    live_id = live.id
+    mei = User.query.filter_by(email="mei@example.com").first()
+    live_credits = [m for m in mei.memberships if m.status == "active"][0].credits_remaining
+    future_id = sample.id
+    future_start = sample.start
+
+r = client.post("/classes/%d/book" % live_id, follow_redirects=True)
+check("in-progress class cannot be booked",
+      "has started" in r.get_data(as_text=True).lower(), r.get_data(as_text=True)[:180])
+r = client.get("/classes/%d" % live_id)
+check("in-progress class shows a started button",
+      "Started" in r.get_data(as_text=True))
+r = client.post("/classes/%d/wait" % live_id, follow_redirects=True)
+check("in-progress class cannot be joined on the waitlist",
+      "has started" in r.get_data(as_text=True).lower(), r.get_data(as_text=True)[:180])
+with app.app_context():
+    mei = User.query.filter_by(email="mei@example.com").first()
+    credits_now = [m for m in mei.memberships if m.status == "active"][0].credits_remaining
+    queued = Booking.query.filter_by(user_id=mei.id, class_session_id=live_id).count()
+    check("in-progress book did not take a credit", credits_now == live_credits, str(credits_now))
+    check("in-progress class gained no booking", queued == 0, str(queued))
+
+r = client.post("/logout")
+r = client.post("/login", data={"email": "staff@example.com", "password": "password"})
+past_start = (datetime.now() - timedelta(days=1)).replace(minute=0, second=0, microsecond=0)
+past_end = past_start + timedelta(hours=1)
+r = client.post("/admin/classes/%d/edit" % future_id,
+                data=edit_payload(future_id,
+                                  start=past_start.strftime("%Y-%m-%dT%H:%M"),
+                                  end=past_end.strftime("%Y-%m-%dT%H:%M")),
+                follow_redirects=True)
+check("a future class cannot be moved into the past",
+      "already in the past" in r.get_data(as_text=True).lower(), r.get_data(as_text=True)[:180])
+with app.app_context():
+    kept = db.session.get(ClassSession, future_id)
+    check("the future class time was not moved", kept.start == future_start,
+          kept.start.strftime("%Y-%m-%d %H:%M"))
+    before = ClassSession.query.count()
+    new_type = kept.class_type_id
+    new_instructor = kept.instructor_id
+    new_room = kept.room_id
+
+r = client.post("/admin/classes/new", data={
+    "class_type_id": str(new_type),
+    "instructor_id": str(new_instructor),
+    "room_id": str(new_room),
+    "start": past_start.strftime("%Y-%m-%dT%H:%M"),
+    "end": past_end.strftime("%Y-%m-%dT%H:%M"),
+    "capacity": "8",
+}, follow_redirects=True)
+check("a new class cannot start in the past",
+      "already in the past" in r.get_data(as_text=True).lower(), r.get_data(as_text=True)[:180])
+with app.app_context():
+    check("no past class was created", ClassSession.query.count() == before, str(ClassSession.query.count()))
+
+# -------------------------------- an offer occupies the member's time
+r = client.post("/logout")
+r = client.post("/login", data={"email": "mei@example.com", "password": "password"})
+with app.app_context():
+    sample = ClassSession.query.first()
+    start = datetime.now() + timedelta(days=12)
+    end = start + timedelta(hours=1)
+    held = ClassSession(class_type_id=sample.class_type_id, instructor_id=sample.instructor_id,
+                        room_id=sample.room_id, start=start, end=end, capacity=6)
+    other = ClassSession(class_type_id=sample.class_type_id, instructor_id=sample.instructor_id,
+                         room_id=sample.room_id, start=start, end=end, capacity=6)
+    db.session.add_all([held, other])
+    db.session.flush()
+    mei = User.query.filter_by(email="mei@example.com").first()
+    card = [m for m in mei.memberships if m.status == "active"][0]
+    offer_credits = card.credits_remaining
+    db.session.add(Booking(user_id=mei.id, class_session_id=held.id, membership_id=card.id,
+                           status="Offered", offered_at=datetime.utcnow()))
+    passed = Booking(user_id=mei.id, class_session_id=other.id, membership_id=card.id,
+                     status="Passed")
+    db.session.add(passed)
+    db.session.commit()
+    other_id = other.id
+    passed_id = passed.id
+
+r = client.post("/classes/%d/book" % other_id, follow_redirects=True)
+check("an offer blocks an overlapping booking",
+      "overlap" in r.get_data(as_text=True).lower(), r.get_data(as_text=True)[:180])
+with app.app_context():
+    mei = User.query.filter_by(email="mei@example.com").first()
+    card = [m for m in mei.memberships if m.status == "active"][0]
+    still = Booking.query.filter_by(user_id=mei.id, class_session_id=other_id, status="Booked").first()
+    check("the overlapping book was not saved", still is None)
+    check("the offer did not spend a credit", card.credits_remaining == offer_credits,
+          str(card.credits_remaining))
+
+before_utc = datetime.utcnow()
+r = client.post("/bookings/%d/rejoin" % passed_id, follow_redirects=True)
+check("rejoin is accepted", "queue" in r.get_data(as_text=True).lower(), r.get_data(as_text=True)[:180])
+with app.app_context():
+    rejoined = db.session.get(Booking, passed_id)
+    check("rejoin uses the same clock as the rest of the queue",
+          before_utc <= rejoined.booked_at <= datetime.utcnow() + timedelta(seconds=2),
+          str(rejoined.booked_at))
 
 # ---------------------------------------------------------------------- report
 failed = [x for x in results if not x[1]]

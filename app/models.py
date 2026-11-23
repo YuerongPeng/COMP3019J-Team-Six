@@ -208,7 +208,8 @@ class Booking(db.Model):
     cancelled_at = db.Column(db.DateTime)
     active = db.Column(db.Boolean, nullable=False, default=True)
     # Set when a time change pulls this class inside the two-hour cut-off.
-    # That member can still cancel and have the credit returned.
+    # That member can still cancel until the class starts. After the start,
+    # the credit is not returned.
     late_change_cancel = db.Column(db.Boolean, nullable=False, default=False)
     offered_at = db.Column(db.DateTime)
     skip_seen = db.Column(db.Boolean, nullable=False, default=False)
