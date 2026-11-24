@@ -277,7 +277,9 @@ def cancel(booking_id):
                 )
             raise RuleError("That booking is already cancelled.")
         membership = lock_membership(booking.membership_id)
-        if membership is not None and membership.credits_remaining is not None:
+        if (membership is not None
+                and membership.status == "active"
+                and membership.credits_remaining is not None):
             membership.credits_remaining += 1
         offered = _offer_next(booking.class_session_id)
         db.session.commit()
@@ -323,7 +325,7 @@ def _offer_next(session_id):
         if nxt is None:
             return offered
         nxt.status = "Offered"
-        nxt.offered_at = datetime.now()
+        nxt.offered_at = datetime.utcnow()
         offered = True
         db.session.flush()
     return offered
@@ -506,14 +508,14 @@ def _closed_key(booking):
 def seconds_left(booking, now=None):
     if booking.offered_at is None:
         return 0
-    now = now or datetime.now()
+    now = now or datetime.utcnow()
     remaining = booking.offered_at + timedelta(minutes=OFFER_MINUTES) - now
     return max(0, int(remaining.total_seconds()))
 
 
 def expire_offers():
     """Pass any offer that was not accepted within 30 minutes, then move the queue."""
-    now = datetime.now()
+    now = datetime.utcnow()
     rows = Booking.query.filter_by(status="Offered").all()
     sessions = set()
     changed = False
@@ -536,10 +538,9 @@ def expire_offers():
 
 
 def open_offers(user):
-    expire_offers()
     if not user.is_authenticated or user.role != "member":
         return []
-    now = datetime.now()
+    now = datetime.utcnow()
     rows = (Booking.query
             .filter_by(user_id=user.id, status="Offered")
             .order_by(Booking.offered_at.asc())
@@ -558,9 +559,7 @@ def unseen_pass(user):
 
 def login_destination(user):
     """Where a member goes immediately after signing in."""
-    close_finished()
-    db.session.commit()
-    expire_offers()
+    cleanup_expired()
     if user.role == "instructor":
         return url_for("scheduling.my_classes")
     if user.role != "member":
@@ -578,9 +577,7 @@ def login_destination(user):
 @login_required
 def offer_page(booking_id):
     _require_member()
-    close_finished()
-    db.session.commit()
-    expire_offers()
+    cleanup_expired()
     booking = db.get_or_404(Booking, booking_id)
     if booking.user_id != current_user.id:
         abort(403)
@@ -675,10 +672,23 @@ def close_finished(now=None):
     return bool(rows)
 
 
+def cleanup_expired(now=None):
+    """One entry point for dropped finished queues and expired offers.
+
+    Read paths (my-bookings, the login redirect, the offer page) used to inline
+    ``close_finished(); commit(); expire_offers()``, which opened a write
+    transaction on every read. This commits only when something actually
+    changed: close_finished commits when it dropped rows, expire_offers
+    commits itself when it passed an offer. A pure read stays a pure read.
+    """
+    if close_finished(now):
+        db.session.commit()
+    expire_offers()
+
+
 def attendance_list(class_row):
     """Booked, attended and no-show rows. A finished class drops its queue first."""
-    close_finished()
-    db.session.commit()
+    cleanup_expired()
     class_row = db.session.get(ClassSession, class_row.id)
     rows = [b for b in class_row.bookings if b.status in ("Booked", "Attended", "No-show")]
     rows.sort(key=lambda b: (b.user.name.lower(), b.id))

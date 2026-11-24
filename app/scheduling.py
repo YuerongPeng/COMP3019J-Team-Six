@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import or_, select, text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from . import db
 from .access import RuleError, staff_only
@@ -306,7 +306,12 @@ def instructor_accounts():
             db.session.add(user)
             db.session.flush()
             instructor.user_id = user.id
-            db.session.commit()
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                flash("That email address is already in use.")
+                return redirect(url_for("scheduling.instructor_accounts"), code=303)
             flash("Instructor login created and linked.")
             return redirect(url_for("scheduling.instructor_accounts"), code=303)
     instructors = Instructor.query.order_by(Instructor.name).all()
@@ -453,7 +458,7 @@ def class_edit(session_id):
             dropped = 0
             if class_row.start != previous_start:
                 dropped = _drop_clashing_waiters(class_row)
-                restarted = datetime.now()
+                restarted = datetime.utcnow()
                 for booking in class_row.bookings:
                     if booking.status == "Offered":
                         booking.offered_at = restarted
@@ -643,7 +648,7 @@ def respond_to_proposal(proposal_id, action):
         _keep_cancel_open(class_row, previous_start)
         if class_row.start != previous_start:
             _drop_clashing_waiters(class_row)
-            restarted = datetime.now()
+            restarted = datetime.utcnow()
             for booking in class_row.bookings:
                 if booking.status == "Offered":
                     booking.offered_at = restarted

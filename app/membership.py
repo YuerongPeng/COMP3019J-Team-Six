@@ -9,6 +9,7 @@ from datetime import date, timedelta
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required, login_user
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from . import db
@@ -35,7 +36,7 @@ def _renewal_end(current_end, plan):
 def active_card(user_id, locking=False):
     query = (Membership.query
              .filter_by(user_id=user_id, status="active")
-             .order_by(Membership.start.desc()))
+             .order_by(Membership.end.desc()))
     if locking:
         query = query.with_for_update()
     return query.first()
@@ -73,7 +74,12 @@ def register():
     user = User(name=name, email=email, role="member",
                 password_hash=generate_password_hash(password))
     db.session.add(user)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        flash("That email is already registered.")
+        return render_template("register.html"), 200
     login_user(user)
     flash("Account created and you are signed in. Choose a plan on the Plans page to get started.")
     return redirect(url_for("access.timetable"), code=303)
