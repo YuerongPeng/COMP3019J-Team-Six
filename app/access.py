@@ -149,10 +149,8 @@ def logout():
 def my_bookings():
     if current_user.role != "member":
         abort(403)
-    from .booking import cancel_block, close_finished, expire_offers, open_offers, seconds_left
-    close_finished()
-    db.session.commit()
-    expire_offers()
+    from .booking import cancel_block, cleanup_expired, open_offers, seconds_left
+    cleanup_expired()
     now = datetime.now()
     bookings = (Booking.query
                 .filter_by(user_id=current_user.id)
