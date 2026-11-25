@@ -54,7 +54,7 @@ def register_form():
 @bp.post("/register")
 def register():
     name = request.form.get("name", "").strip()
-    email = request.form.get("email", "").strip()
+    email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
     confirm = request.form.get("confirm", "")
 

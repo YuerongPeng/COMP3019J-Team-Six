@@ -281,41 +281,64 @@ def class_list():
 @staff_only
 def instructor_accounts():
     if request.method == "POST":
-        instructor = db.session.get(Instructor, request.form.get("instructor_id", type=int))
-        if instructor is not None:
-            db.session.execute(
-                text("UPDATE instructor SET user_id = user_id WHERE id = :i"),
-                {"i": instructor.id},
-            )
-            db.session.refresh(instructor)
-        name = request.form.get("name", "").strip()
-        email = request.form.get("email", "").strip().lower()
-        password = request.form.get("password", "")
-        if instructor is None:
-            flash("Choose a valid instructor.")
-        elif instructor.user_id is not None:
-            flash("This instructor already has a login account.")
-        elif not name or not email or len(password) < 6:
-            flash("Enter a name, email and password of at least 6 characters.")
-        elif User.query.filter_by(email=email).first():
-            flash("That email address is already in use.")
-        else:
-            from werkzeug.security import generate_password_hash
-            user = User(name=name, email=email, role="instructor",
-                        password_hash=generate_password_hash(password))
-            db.session.add(user)
-            db.session.flush()
-            instructor.user_id = user.id
-            try:
-                db.session.commit()
-            except IntegrityError:
-                db.session.rollback()
-                flash("That email address is already in use.")
-                return redirect(url_for("scheduling.instructor_accounts"), code=303)
-            flash("Instructor login created and linked.")
-            return redirect(url_for("scheduling.instructor_accounts"), code=303)
+        action = request.form.get("action", "")
+        if action == "add_instructor":
+            return _add_instructor(request)
+        return _link_instructor_account(request)
     instructors = Instructor.query.order_by(Instructor.name).all()
     return render_template("instructor_accounts.html", instructors=instructors)
+
+
+def _add_instructor(request):
+    name = request.form.get("instructor_name", "").strip()
+    profile = request.form.get("profile", "").strip() or None
+    if not name:
+        flash("Enter the instructor's name.")
+        return redirect(url_for("scheduling.instructor_accounts"), code=303)
+    if Instructor.query.filter_by(name=name).first() is not None:
+        flash("An instructor with that name already exists.")
+        return redirect(url_for("scheduling.instructor_accounts"), code=303)
+    db.session.add(Instructor(name=name, profile=profile))
+    db.session.commit()
+    flash("Instructor '%s' added. Create and link their login below to activate them." % name)
+    return redirect(url_for("scheduling.instructor_accounts"), code=303)
+
+
+def _link_instructor_account(request):
+    instructor = db.session.get(Instructor, request.form.get("instructor_id", type=int))
+    if instructor is not None:
+        db.session.execute(
+            text("UPDATE instructor SET user_id = user_id WHERE id = :i"),
+            {"i": instructor.id},
+        )
+        db.session.refresh(instructor)
+    name = request.form.get("name", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+    if instructor is None:
+        flash("Choose a valid instructor.")
+    elif instructor.user_id is not None:
+        flash("This instructor already has a login account.")
+    elif not name or not email or len(password) < 6:
+        flash("Enter a name, email and password of at least 6 characters.")
+    elif User.query.filter_by(email=email).first():
+        flash("That email address is already in use.")
+    else:
+        from werkzeug.security import generate_password_hash
+        user = User(name=name, email=email, role="instructor",
+                    password_hash=generate_password_hash(password))
+        db.session.add(user)
+        db.session.flush()
+        instructor.user_id = user.id
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash("That email address is already in use.")
+            return redirect(url_for("scheduling.instructor_accounts"), code=303)
+        flash("Instructor login created and linked.")
+        return redirect(url_for("scheduling.instructor_accounts"), code=303)
+    return redirect(url_for("scheduling.instructor_accounts"), code=303)
 
 
 @bp.get("/admin/change-requests")
@@ -677,3 +700,32 @@ def plans():
         return redirect(url_for("scheduling.plans"), code=303)
     return render_template("plans.html", plans=MembershipPlan.query.all(),
                            memberships=Membership.query.all())
+
+
+@bp.route("/admin/staff", methods=["GET", "POST"])
+@staff_only
+def staff_accounts():
+    if request.method == "POST":
+        from werkzeug.security import generate_password_hash
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        if not name or not email or len(password) < 6:
+            flash("Enter a name, email and password of at least 6 characters.")
+        elif User.query.filter_by(email=email).first():
+            flash("That email address is already in use.")
+        else:
+            user = User(name=name, email=email, role="staff",
+                        password_hash=generate_password_hash(password))
+            db.session.add(user)
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                flash("That email address is already in use.")
+                return redirect(url_for("scheduling.staff_accounts"), code=303)
+            flash("Staff account created for %s." % name)
+            return redirect(url_for("scheduling.staff_accounts"), code=303)
+        return redirect(url_for("scheduling.staff_accounts"), code=303)
+    staff = User.query.filter_by(role="staff").order_by(User.name).all()
+    return render_template("staff_accounts.html", staff=staff)
