@@ -16,6 +16,7 @@
         <a href="{{ url_for('scheduling.class_list') }}">Manage classes</a>
         <a href="{{ url_for('scheduling.change_requests') }}">Change requests</a>
         <a href="{{ url_for('scheduling.instructor_accounts') }}">Instructor accounts</a>
+        <a href="{{ url_for('scheduling.staff_accounts') }}">Staff accounts</a>
         <a href="{{ url_for('scheduling.plans') }}">Plans</a>
       {% elif current_user.role == 'instructor' %}
         <a href="{{ url_for('scheduling.my_classes') }}">My classes</a>
