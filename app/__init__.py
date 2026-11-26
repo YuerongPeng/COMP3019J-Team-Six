@@ -129,6 +129,36 @@ def _ensure_maya_pilates_skill(app):
         db.session.commit()
 
 
+def _ensure_class_type_description(app):
+    """Add the class introduction and fill the four seeded types on older databases."""
+    blurbs = {
+        "Yoga": "A mat class for mobility. You move at your own pace.",
+        "Cycling": "A bike session. The studio provides the bikes.",
+        "Pilates": "A mat class for control and posture.",
+        "Strength": "A weights class. The room provides the weights.",
+    }
+    with app.app_context():
+        try:
+            insp = inspect(db.engine)
+        except Exception:
+            return
+        if not insp.has_table("class_type"):
+            return
+        names = {col["name"] for col in insp.get_columns("class_type")}
+        if "description" not in names:
+            db.session.execute(text("ALTER TABLE class_type ADD COLUMN description TEXT"))
+            db.session.commit()
+        from .models import ClassType
+        changed = False
+        for name, blurb in blurbs.items():
+            row = ClassType.query.filter_by(name=name).first()
+            if row is not None and not row.description:
+                row.description = blurb
+                changed = True
+        if changed:
+            db.session.commit()
+
+
 def create_app(config_object="config.Config"):
     app = Flask(__name__, instance_relative_config=True,
                 template_folder=os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates"),
@@ -140,6 +170,7 @@ def create_app(config_object="config.Config"):
     db.init_app(app)
     _ensure_booking_columns(app)
     _ensure_instructor_account(app)
+    _ensure_class_type_description(app)
     _ensure_notification_table(app)
     _ensure_maya_pilates_skill(app)
     login_manager.init_app(app)

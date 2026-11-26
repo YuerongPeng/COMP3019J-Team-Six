@@ -19,7 +19,14 @@
       <td>{{ b.session.class_type.name }}</td>
       <td>{{ b.session.start.strftime("%a %d %b, %H:%M") }}</td>
       <td>{{ b.session.instructor.name }}</td>
-      <td>{{ b.status }}</td>
+      <td>
+        {% if ranks.get(b.id) %}
+        Waiting {{ ranks[b.id].position }} of {{ ranks[b.id].total }}
+        <div class="hint">Offered from position 1 downward. Each person has 30 minutes to confirm. Nothing is booked until they do.</div>
+        {% else %}
+        {{ b.status }}
+        {% endif %}
+      </td>
       <td>
         {% if cancel_states.get(b.id) %}
         {% set state = cancel_states[b.id] %}
@@ -27,7 +34,7 @@
           {% if state.disabled %}
           <button type="button" class="blocked" disabled>Cancel</button>
           {% else %}
-          <form method="post" action="{{ url_for('booking.cancel', booking_id=b.id) }}"><button>Cancel</button></form>
+          <form method="post" data-once action="{{ url_for('booking.cancel', booking_id=b.id) }}"><button>Cancel</button></form>
           {% endif %}
           {% if state.detail %}
           <button type="button" class="bang" aria-label="{{ state.detail }}">!
@@ -39,8 +46,8 @@
         <form method="post" action="{{ url_for('booking.leave', booking_id=b.id) }}"><button class="btn ghost">Leave waitlist</button></form>
         {% elif b.status == 'Offered' %}
         <span class="choice">
-          <form method="post" action="{{ url_for('booking.confirm', booking_id=b.id) }}"><button>Confirm</button></form>
-          <form method="post" action="{{ url_for('booking.decline', booking_id=b.id) }}"><button class="btn ghost">Decline</button></form>
+          <form method="post" data-once action="{{ url_for('booking.confirm', booking_id=b.id) }}"><button>Confirm</button></form>
+          <form method="post" data-once action="{{ url_for('booking.decline', booking_id=b.id) }}"><button class="btn ghost">Decline</button></form>
           <button type="button" class="bang" aria-label="A place is open. Confirm to book it.">!
             <span class="bang-note">A place is open. Confirm to book it.</span>
           </button>

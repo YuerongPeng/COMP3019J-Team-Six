@@ -63,10 +63,14 @@ def seed():
     db.session.add_all([maya, quinn, rob])
     db.session.flush()
 
-    yoga = ClassType(name="Yoga", required_equipment="mats", duration_min=60)
-    spin = ClassType(name="Cycling", required_equipment="bikes", duration_min=45)
-    pilates = ClassType(name="Pilates", required_equipment="mats", duration_min=60)
-    strength = ClassType(name="Strength", required_equipment="weights", duration_min=60)
+    yoga = ClassType(name="Yoga", required_equipment="mats", duration_min=60,
+                     description="A mat class for mobility. You move at your own pace.")
+    spin = ClassType(name="Cycling", required_equipment="bikes", duration_min=45,
+                     description="A bike session. The studio provides the bikes.")
+    pilates = ClassType(name="Pilates", required_equipment="mats", duration_min=60,
+                        description="A mat class for control and posture.")
+    strength = ClassType(name="Strength", required_equipment="weights", duration_min=60,
+                         description="A weights class. The room provides the weights.")
     db.session.add_all([yoga, spin, pilates, strength])
     db.session.flush()
 

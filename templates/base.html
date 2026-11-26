@@ -43,6 +43,25 @@
 <footer class="foot">Team Six · skeleton</footer>
 <script src="{{ url_for('static', filename='reveal.js') }}"></script>
 <script>
+document.querySelectorAll("form[data-once]").forEach(function (form) {
+  form.addEventListener("submit", function (event) {
+    if (form.dataset.locked === "1" || document.body.dataset.actionLocked === "1") {
+      event.preventDefault();
+      return;
+    }
+    document.body.dataset.actionLocked = "1";
+    form.dataset.locked = "1";
+    window.setTimeout(function () {
+      document.querySelectorAll("form[data-once] button").forEach(function (button) {
+        if ((button.getAttribute("type") || "submit") !== "button") {
+          button.disabled = true;
+        }
+      });
+    }, 0);
+  });
+});
+</script>
+<script>
 document.querySelectorAll(".count").forEach(function (node) {
   var left = parseInt(node.getAttribute("data-seconds"), 10) || 0;
   function paint() {

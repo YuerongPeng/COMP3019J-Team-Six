@@ -151,6 +151,17 @@ h2 { font-size: 20px; margin: 36px 0 8px; }
 }
 .filters .check input { width: auto; }
 .filters .btn { margin-bottom: 2px; }
+.week-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 8px 0;
+}
+.week-nav strong { font-size: 15px; }
+.day-label { margin: 22px 8px 0; font-size: 16px; }
+.rules { margin: 8px 0 16px; padding-left: 18px; }
+.rules li { margin: 6px 0; }
 
 .offer-box {
   max-width: 360px;

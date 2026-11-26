@@ -105,6 +105,32 @@ def plan_notice(user):
     return None
 
 
+def waiting_queue(session_id):
+    """People still waiting, earliest first. This is the offer order."""
+    return (Booking.query
+            .filter_by(class_session_id=session_id, status="Waiting")
+            .order_by(Booking.booked_at.asc(), Booking.id.asc())
+            .all())
+
+
+def waitlist_place(user_id, session_id):
+    """This member's place in that offer order, counting from 1."""
+    rows = waiting_queue(session_id)
+    for index, row in enumerate(rows, start=1):
+        if row.user_id == user_id:
+            return {"position": index, "total": len(rows)}
+    return None
+
+
+def waitlist_view(session_id, user_id=None):
+    """The queue as positions only. Names stay off the page."""
+    rows = waiting_queue(session_id)
+    return [{
+        "position": index,
+        "yours": user_id is not None and row.user_id == user_id,
+    } for index, row in enumerate(rows, start=1)]
+
+
 def book_block(user, class_row):
     """Why this member cannot book, or None when the Book button may be used.
 
@@ -151,7 +177,19 @@ def book_block(user, class_row):
     if class_row.places_left <= 0:
         mine_here = [b for b in user.bookings if b.class_session_id == class_row.id]
         if any(b.status == "Waiting" for b in mine_here):
-            return {"label": "Waiting", "detail": "You are in the queue.", "action": "queued"}
+            place = waitlist_place(user.id, class_row.id)
+            if place is None:
+                return {"label": "Waiting", "detail": "You are in the queue.", "action": "queued"}
+            return {
+                "label": "Waiting %d/%d" % (place["position"], place["total"]),
+                "detail": (
+                    "You are %d of %d. The next place is offered to position 1. "
+                    "Each person has 30 minutes to confirm, and nothing is booked until they do."
+                ) % (place["position"], place["total"]),
+                "action": "queued",
+                "position": place["position"],
+                "total": place["total"],
+            }
         if any(b.status == "Offered" for b in mine_here):
             return {
                 "label": "Offered",
@@ -318,12 +356,10 @@ def _offer_next(session_id):
         return False
     offered = False
     while held_count(session_id) < class_row.capacity:
-        nxt = (Booking.query
-               .filter_by(class_session_id=session_id, status="Waiting")
-               .order_by(Booking.booked_at.asc(), Booking.id.asc())
-               .first())
-        if nxt is None:
+        waiting = waiting_queue(session_id)
+        if not waiting:
             return offered
+        nxt = waiting[0]
         nxt.status = "Offered"
         nxt.offered_at = datetime.utcnow()
         offered = True

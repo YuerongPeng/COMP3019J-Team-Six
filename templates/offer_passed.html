@@ -4,7 +4,7 @@
 <h1>Place passed on</h1>
 <div class="card offer-box">
   <p>The place for <strong>{{ booking.session.class_type.name }}</strong> at {{ booking.session.start.strftime("%a %d %b, %H:%M") }} was given to the next person because it was not confirmed within 30 minutes.</p>
-  <form method="post" action="{{ url_for('booking.rejoin', booking_id=booking.id) }}"><button>Join the back of the queue</button></form>
+  <form method="post" data-once action="{{ url_for('booking.rejoin', booking_id=booking.id) }}"><button>Join the back of the queue</button></form>
   <form method="post" action="{{ url_for('booking.close_passed', booking_id=booking.id) }}"><button class="btn ghost">Close</button></form>
 </div>
 {% endblock %}

@@ -24,7 +24,7 @@
       <td>{{ b.status }}</td>
       {% if can_mark %}
       <td>
-        <form method="post" action="{{ url_for('scheduling.attendance', session_id=session.id) }}">
+        <form method="post" data-once action="{{ url_for('scheduling.attendance', session_id=session.id) }}">
           <input type="hidden" name="booking_id" value="{{ b.id }}">
           <span class="choice">
             {% if b.status == 'Attended' %}

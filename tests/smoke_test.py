@@ -502,6 +502,58 @@ with app.app_context():
           before_utc <= rejoined.booked_at <= datetime.utcnow() + timedelta(seconds=2),
           str(rejoined.booked_at))
 
+# ------------------------------------------------ week, queue
+with app.app_context():
+    from app.models import ClassType, Instructor
+    pilates = (ClassSession.query
+               .join(ClassType, ClassSession.class_type_id == ClassType.id)
+               .filter(ClassType.name == "Pilates")
+               .first())
+    strength = (ClassSession.query
+                .join(ClassType, ClassSession.class_type_id == ClassType.id)
+                .filter(ClassType.name == "Strength")
+                .first())
+    week = (pilates.start - timedelta(days=pilates.start.weekday())).strftime("%Y-%m-%d")
+    rob_id = Instructor.query.filter_by(name="Rob Diaz").first().id
+    sample = ClassSession.query.first()
+    start = datetime.now() + timedelta(days=20)
+    queued = ClassSession(class_type_id=sample.class_type_id, instructor_id=sample.instructor_id,
+                          room_id=sample.room_id, start=start, end=start + timedelta(hours=1),
+                          capacity=8)
+    db.session.add(queued)
+    db.session.flush()
+    mei = User.query.filter_by(email="mei@example.com").first()
+    card = [m for m in mei.memberships if m.status == "active"][0]
+    db.session.add(Booking(user_id=mei.id, class_session_id=queued.id, membership_id=card.id,
+                           status="Waiting", booked_at=datetime.utcnow()))
+    db.session.commit()
+    queued_id = queued.id
+    pilates_id = pilates.id
+
+r = client.get("/timetable?week=%s&slot=morning" % week)
+body = r.get_data(as_text=True)
+check("morning filter keeps the morning class",
+      ">Pilates</a>" in body and ">Strength</a>" not in body, body[:180])
+r = client.get("/timetable?week=%s&instructor=%d" % (week, rob_id))
+body = r.get_data(as_text=True)
+check("instructor filter keeps that instructor",
+      ">Strength</a>" in body and ">Pilates</a>" not in body, body[:180])
+r = client.get("/classes/%d" % pilates_id)
+body = r.get_data(as_text=True)
+check("class page shows the introduction and the rules",
+      "control and posture" in body and "Yoga and mobility" in body
+      and "two hours" in body and "30 minutes" in body, body[:220])
+r = client.get("/classes/%d" % queued_id)
+check("waitlist order marks this member", "You are here" in r.get_data(as_text=True), "")
+r = client.get("/my-bookings")
+check("waitlist rank is on my bookings", "1 of 1" in r.get_data(as_text=True), "")
+r = client.get("/absences")
+check("absences page is gone", r.status_code == 404, str(r.status_code))
+r = client.get("/timetable")
+body = r.get_data(as_text=True)
+check("booking buttons are marked to submit once",
+      "data-once" in body and "Absences" not in body, "")
+
 # ---------------------------------------------------------------------- report
 failed = [x for x in results if not x[1]]
 for name, ok, detail in results:

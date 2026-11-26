@@ -5,13 +5,49 @@
 <p>{{ session.start.strftime("%A %d %B, %H:%M") }} · {{ session.end.strftime("%H:%M") }}</p>
 <p>Instructor {{ session.instructor.name }} · {{ session.room.name }} · capacity {{ session.capacity }}</p>
 <p><strong>{{ session.places_left }}</strong> places left.</p>
+
+<h2>About this class</h2>
+<p>{{ session.class_type.description or "No introduction has been added for this class." }}</p>
+<p>{{ session.class_type.duration_min }} minutes. Equipment: {{ session.class_type.required_equipment or "none listed" }}.</p>
+<p>Instructor {{ session.instructor.name }}. {{ session.instructor.profile or "No profile has been added." }}</p>
+
+<h2>Cancellation</h2>
+<ul class="rules">
+  <li>A booked place can be cancelled until two hours before the start. If the card counts visits, the visit goes back to that same card, and the place is offered to the next person waiting.</li>
+  <li>Inside those two hours the booking stays and the visit is not returned.</li>
+  <li>If staff moved the start into that two-hour window, a member who was already booked can still cancel until the class starts.</li>
+  <li>Once the class has started, it cannot be cancelled.</li>
+</ul>
+
+<h2>Waitlist</h2>
+<ul class="rules">
+  <li>You can join only when the class is full. Waiting does not hold a seat and does not use a visit.</li>
+  <li>A free place is offered to position 1, the person who has waited longest. They have 30 minutes to confirm. The class is not booked until they confirm.</li>
+  <li>If they decline, or the 30 minutes pass, the place goes to the next position. Joining again after that puts you at the back.</li>
+  <li>Once the class has started, no further offers are made. When it ends, people still waiting or still unconfirmed are removed, and no visit is charged.</li>
+</ul>
+{% if queue %}
+<ol class="rules">
+  {% for spot in queue %}
+  <li>{% if spot.yours %}You are here.{% else %}Waiting.{% endif %}</li>
+  {% endfor %}
+</ol>
+<p class="hint">This is the offer order. Position 1 is offered first.</p>
+{% endif %}
+
+<h2>Attendance</h2>
+<ul class="rules">
+  <li>After the class ends, the instructor of this class marks each booked member as attended or no-show.</li>
+  <li>Neither result returns a visit or frees the seat.</li>
+  <li>Staff can read the list. Only that instructor can mark it.</li>
+</ul>
 {% if current_user.is_authenticated and current_user.role == 'member' %}
   {% if block %}
     {% with session_id=session.id %}
     {% include "_book_control.html" %}
     {% endwith %}
   {% else %}
-    <form method="post" action="{{ url_for('booking.book', session_id=session.id) }}"><button>Book this class</button></form>
+    <form method="post" data-once action="{{ url_for('booking.book', session_id=session.id) }}"><button>Book this class</button></form>
   {% endif %}
 {% elif current_user.is_authenticated and current_user.role == 'staff' %}
   <p class="hint">

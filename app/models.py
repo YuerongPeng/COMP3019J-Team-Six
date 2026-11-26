@@ -161,6 +161,7 @@ class ClassType(db.Model):
     name = db.Column(db.String(40), nullable=False)
     required_equipment = db.Column(db.String(120))
     duration_min = db.Column(db.Integer, nullable=False, default=60)
+    description = db.Column(db.Text)
 
 
 class ClassSession(db.Model):
