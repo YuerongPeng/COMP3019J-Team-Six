@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Staff accounts{% endblock %}
+{% block content %}
+<h1>Staff accounts</h1>
+<table>
+  <thead><tr><th>Name</th><th>Email</th></tr></thead>
+  <tbody>
+  {% for s in staff %}
+    <tr><td>{{ s.name }}</td><td>{{ s.email }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>Create a staff account</h2>
+<form method="post" class="narrow">
+  <label for="name">Name</label>
+  <input id="name" name="name" type="text" required>
+  <label for="email">Email</label>
+  <input id="email" name="email" type="email" required>
+  <label for="password">Temporary password</label>
+  <input id="password" name="password" type="password" minlength="6" required>
+  <button>Create staff account</button>
+</form>
+<p class="hint">Staff accounts have full management rights. Only create them for real employees.</p>
+{% endblock %}

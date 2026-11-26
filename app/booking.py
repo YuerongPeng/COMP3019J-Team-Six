@@ -64,10 +64,12 @@ def _locked_booking(booking_id):
 
 
 def _member_time_conflict(user_id, class_row, ignore_booking_id=None):
+    """Another class this member already holds, including an open offer."""
     query = (Booking.query
              .join(ClassSession, Booking.class_session_id == ClassSession.id)
              .filter(Booking.user_id == user_id,
-                     Booking.status == "Booked",
+                     Booking.class_session_id != class_row.id,
+                     Booking.status.in_(("Booked", "Offered")),
                      ClassSession.start < class_row.end,
                      ClassSession.end > class_row.start))
     if ignore_booking_id is not None:
@@ -112,8 +114,14 @@ def book_block(user, class_row):
     if not user.is_authenticated or user.role != "member":
         return None
     booked = [b for b in user.bookings if b.status == "Booked"]
+    holding = [b for b in user.bookings if b.status in ("Booked", "Offered")]
     if any(b.class_session_id == class_row.id for b in booked):
         return {"label": "Booked", "detail": ""}
+    if class_row.start <= datetime.now():
+        return {
+            "label": "Started",
+            "detail": "This class has already started.",
+        }
     membership = active_membership(user.id)
     if membership is None or membership.end < class_row.start.date():
         return {"label": "Plan expired", "detail": ""}
@@ -124,7 +132,9 @@ def book_block(user, class_row):
             "label": "Off-peak",
             "detail": "This plan only covers classes that start before 16:00.",
         }
-    for other in booked:
+    for other in holding:
+        if other.class_session_id == class_row.id:
+            continue
         if other.session.start < class_row.end and class_row.start < other.session.end:
             return {
                 "label": "Time clash",
@@ -132,6 +142,12 @@ def book_block(user, class_row):
                     other.session.class_type.name,
                     other.session.start.strftime("%a %H:%M")),
             }
+    if any(b.class_session_id == class_row.id and b.status == "Offered" for b in holding):
+        return {
+            "label": "Offered",
+            "detail": "Confirm this place in My bookings.",
+            "action": "queued",
+        }
     if class_row.places_left <= 0:
         mine_here = [b for b in user.bookings if b.class_session_id == class_row.id]
         if any(b.status == "Waiting" for b in mine_here):
@@ -151,6 +167,11 @@ def cancel_block(booking, now=None):
     if booking.status != "Booked":
         return None
     now = now or datetime.now()
+    if now >= booking.session.start:
+        return {
+            "disabled": True,
+            "detail": "The class has started, so this cannot be cancelled.",
+        }
     inside = booking.session.start - now < timedelta(hours=2)
     if not inside:
         return {"disabled": False, "detail": ""}
@@ -190,13 +211,15 @@ def book(session_id):
             raise RuleError("That class is full.")
         if class_row.end <= datetime.now():
             raise RuleError("That class has ended.")
-        if (Booking.query.filter_by(user_id=current_user.id,
-                                    class_session_id=session_id,
-                                    status="Booked")
+        if class_row.start <= datetime.now():
+            raise RuleError("That class has started.")
+        if (Booking.query.filter(Booking.user_id == current_user.id,
+                                 Booking.class_session_id == session_id,
+                                 Booking.status.in_(("Booked", "Offered")))
                 .with_for_update().first()):
             raise RuleError("You already have this class booked.")
         if _member_time_conflict(current_user.id, class_row):
-            raise RuleError("That overlaps another class you booked.")
+            raise RuleError("That overlaps another class you booked or were offered.")
 
         db.session.add(Booking(user_id=current_user.id,
                                class_session_id=session_id,
@@ -233,6 +256,8 @@ def cancel(booking_id):
         ).scalar_one_or_none()
         if class_row is None:
             abort(404)
+        if datetime.now() >= class_row.start:
+            raise RuleError("The class has started, so this cannot be cancelled.")
         inside_cutoff = class_row.start - datetime.now() < timedelta(hours=2)
         cancellation = Booking.query.filter(
             Booking.id == booking_id, Booking.status == "Booked")
@@ -252,7 +277,9 @@ def cancel(booking_id):
                 )
             raise RuleError("That booking is already cancelled.")
         membership = lock_membership(booking.membership_id)
-        if membership is not None and membership.credits_remaining is not None:
+        if (membership is not None
+                and membership.status == "active"
+                and membership.credits_remaining is not None):
             membership.credits_remaining += 1
         offered = _offer_next(booking.class_session_id)
         db.session.commit()
@@ -287,7 +314,7 @@ def _offer_next(session_id):
     class_row = db.session.get(ClassSession, session_id)
     if class_row is None:
         return False
-    if class_row.end <= datetime.now():
+    if class_row.start <= datetime.now():
         return False
     offered = False
     while held_count(session_id) < class_row.capacity:
@@ -298,7 +325,7 @@ def _offer_next(session_id):
         if nxt is None:
             return offered
         nxt.status = "Offered"
-        nxt.offered_at = datetime.now()
+        nxt.offered_at = datetime.utcnow()
         offered = True
         db.session.flush()
     return offered
@@ -314,13 +341,13 @@ def _eligible(class_row, membership, ignore_booking_id=None):
     duplicate = (Booking.query
                  .filter(Booking.user_id == current_user.id,
                          Booking.class_session_id == class_row.id,
-                         Booking.status == "Booked"))
+                         Booking.status.in_(("Booked", "Offered"))))
     if ignore_booking_id is not None:
         duplicate = duplicate.filter(Booking.id != ignore_booking_id)
     if duplicate.with_for_update().first():
         raise RuleError("You already have this class booked.")
     if _member_time_conflict(current_user.id, class_row, ignore_booking_id):
-        raise RuleError("That overlaps another class you booked.")
+        raise RuleError("That overlaps another class you booked or were offered.")
 
 
 @bp.post("/classes/<int:session_id>/wait")
@@ -335,6 +362,8 @@ def wait(session_id):
             raise RuleError("That class no longer exists.")
         if class_row.end <= datetime.now():
             raise RuleError("That class has ended.")
+        if class_row.start <= datetime.now():
+            raise RuleError("That class has started.")
         if held_count(session_id) < class_row.capacity:
             raise RuleError("That class still has a place. Book it directly.")
         existing = Booking.query.filter(
@@ -382,6 +411,13 @@ def confirm(booking_id):
             close_finished()
             db.session.commit()
             flash("That class has ended. The offer was cancelled and no class was charged.")
+            return redirect(url_for("access.my_bookings"), code=303)
+        if class_row.start <= datetime.now():
+            booking.status = "Cancelled"
+            booking.active = False
+            booking.cancelled_at = datetime.utcnow()
+            db.session.commit()
+            flash("That class has started, so this place can no longer be confirmed.")
             return redirect(url_for("access.my_bookings"), code=303)
         membership = locked_active_membership(current_user.id)
         try:
@@ -472,14 +508,14 @@ def _closed_key(booking):
 def seconds_left(booking, now=None):
     if booking.offered_at is None:
         return 0
-    now = now or datetime.now()
+    now = now or datetime.utcnow()
     remaining = booking.offered_at + timedelta(minutes=OFFER_MINUTES) - now
     return max(0, int(remaining.total_seconds()))
 
 
 def expire_offers():
     """Pass any offer that was not accepted within 30 minutes, then move the queue."""
-    now = datetime.now()
+    now = datetime.utcnow()
     rows = Booking.query.filter_by(status="Offered").all()
     sessions = set()
     changed = False
@@ -502,10 +538,9 @@ def expire_offers():
 
 
 def open_offers(user):
-    expire_offers()
     if not user.is_authenticated or user.role != "member":
         return []
-    now = datetime.now()
+    now = datetime.utcnow()
     rows = (Booking.query
             .filter_by(user_id=user.id, status="Offered")
             .order_by(Booking.offered_at.asc())
@@ -524,9 +559,7 @@ def unseen_pass(user):
 
 def login_destination(user):
     """Where a member goes immediately after signing in."""
-    close_finished()
-    db.session.commit()
-    expire_offers()
+    cleanup_expired()
     if user.role == "instructor":
         return url_for("scheduling.my_classes")
     if user.role != "member":
@@ -544,9 +577,7 @@ def login_destination(user):
 @login_required
 def offer_page(booking_id):
     _require_member()
-    close_finished()
-    db.session.commit()
-    expire_offers()
+    cleanup_expired()
     booking = db.get_or_404(Booking, booking_id)
     if booking.user_id != current_user.id:
         abort(403)
@@ -596,7 +627,7 @@ def rejoin(booking_id):
         flash("You are already booked or waiting for this class.")
         return redirect(url_for("access.my_bookings"), code=303)
     booking.status = "Waiting"
-    booking.booked_at = datetime.now()
+    booking.booked_at = datetime.utcnow()
     booking.offered_at = None
     booking.skip_seen = True
     booking.active = True
@@ -641,10 +672,23 @@ def close_finished(now=None):
     return bool(rows)
 
 
+def cleanup_expired(now=None):
+    """One entry point for dropped finished queues and expired offers.
+
+    Read paths (my-bookings, the login redirect, the offer page) used to inline
+    ``close_finished(); commit(); expire_offers()``, which opened a write
+    transaction on every read. This commits only when something actually
+    changed: close_finished commits when it dropped rows, expire_offers
+    commits itself when it passed an offer. A pure read stays a pure read.
+    """
+    if close_finished(now):
+        db.session.commit()
+    expire_offers()
+
+
 def attendance_list(class_row):
     """Booked, attended and no-show rows. A finished class drops its queue first."""
-    close_finished()
-    db.session.commit()
+    cleanup_expired()
     class_row = db.session.get(ClassSession, class_row.id)
     rows = [b for b in class_row.bookings if b.status in ("Booked", "Attended", "No-show")]
     rows.sort(key=lambda b: (b.user.name.lower(), b.id))

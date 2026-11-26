@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import or_, select, text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from . import db
 from .access import RuleError, staff_only
@@ -187,6 +187,12 @@ def _still_the_opened_class(class_row, form):
     return all(form.get("base_" + key) == value for key, value in opened.items())
 
 
+def _reject_past_start(start):
+    """A new or not-yet-started class cannot be given a start time that has passed."""
+    if start <= datetime.now():
+        raise RuleError("The start time is already in the past. Nothing was written.")
+
+
 def _reject_started_time_change(class_row, form):
     """Once a class has started, its start and end stay as they are.
 
@@ -246,8 +252,9 @@ def _proposal_candidate(class_row, form):
 def _keep_cancel_open(class_row, previous_start):
     """If the new start is inside the cut-off, booked members may still cancel.
 
-    Returns how many bookings were given that chance. A start that stays at
-    least two hours away clears the exception, because the normal rule applies.
+    The exception lasts only until the class starts. A start that stays at
+    least two hours away clears it, because the normal rule applies.
+    Returns how many bookings were given that chance.
     """
     if class_row.start == previous_start:
         return 0
@@ -346,36 +353,64 @@ def class_list():
 @staff_only
 def instructor_accounts():
     if request.method == "POST":
-        instructor = db.session.get(Instructor, request.form.get("instructor_id", type=int))
-        if instructor is not None:
-            db.session.execute(
-                text("UPDATE instructor SET user_id = user_id WHERE id = :i"),
-                {"i": instructor.id},
-            )
-            db.session.refresh(instructor)
-        name = request.form.get("name", "").strip()
-        email = request.form.get("email", "").strip().lower()
-        password = request.form.get("password", "")
-        if instructor is None:
-            flash("Choose a valid instructor.")
-        elif instructor.user_id is not None:
-            flash("This instructor already has a login account.")
-        elif not name or not email or len(password) < 6:
-            flash("Enter a name, email and password of at least 6 characters.")
-        elif User.query.filter_by(email=email).first():
-            flash("That email address is already in use.")
-        else:
-            from werkzeug.security import generate_password_hash
-            user = User(name=name, email=email, role="instructor",
-                        password_hash=generate_password_hash(password))
-            db.session.add(user)
-            db.session.flush()
-            instructor.user_id = user.id
-            db.session.commit()
-            flash("Instructor login created and linked.")
-            return redirect(url_for("scheduling.instructor_accounts"), code=303)
+        action = request.form.get("action", "")
+        if action == "add_instructor":
+            return _add_instructor(request)
+        return _link_instructor_account(request)
     instructors = Instructor.query.order_by(Instructor.name).all()
     return render_template("instructor_accounts.html", instructors=instructors)
+
+
+def _add_instructor(request):
+    name = request.form.get("instructor_name", "").strip()
+    profile = request.form.get("profile", "").strip() or None
+    if not name:
+        flash("Enter the instructor's name.")
+        return redirect(url_for("scheduling.instructor_accounts"), code=303)
+    if Instructor.query.filter_by(name=name).first() is not None:
+        flash("An instructor with that name already exists.")
+        return redirect(url_for("scheduling.instructor_accounts"), code=303)
+    db.session.add(Instructor(name=name, profile=profile))
+    db.session.commit()
+    flash("Instructor '%s' added. Create and link their login below to activate them." % name)
+    return redirect(url_for("scheduling.instructor_accounts"), code=303)
+
+
+def _link_instructor_account(request):
+    instructor = db.session.get(Instructor, request.form.get("instructor_id", type=int))
+    if instructor is not None:
+        db.session.execute(
+            text("UPDATE instructor SET user_id = user_id WHERE id = :i"),
+            {"i": instructor.id},
+        )
+        db.session.refresh(instructor)
+    name = request.form.get("name", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+    if instructor is None:
+        flash("Choose a valid instructor.")
+    elif instructor.user_id is not None:
+        flash("This instructor already has a login account.")
+    elif not name or not email or len(password) < 6:
+        flash("Enter a name, email and password of at least 6 characters.")
+    elif User.query.filter_by(email=email).first():
+        flash("That email address is already in use.")
+    else:
+        from werkzeug.security import generate_password_hash
+        user = User(name=name, email=email, role="instructor",
+                    password_hash=generate_password_hash(password))
+        db.session.add(user)
+        db.session.flush()
+        instructor.user_id = user.id
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash("That email address is already in use.")
+            return redirect(url_for("scheduling.instructor_accounts"), code=303)
+        flash("Instructor login created and linked.")
+        return redirect(url_for("scheduling.instructor_accounts"), code=303)
+    return redirect(url_for("scheduling.instructor_accounts"), code=303)
 
 
 @bp.get("/admin/change-requests")
@@ -431,6 +466,7 @@ def class_new():
                 end=datetime.fromisoformat(request.form["end"]),
                 capacity=int(request.form["capacity"]),
             )
+            _reject_past_start(class_row.start)
             validate_class(class_row)
             db.session.add(class_row)
             db.session.commit()
@@ -473,6 +509,8 @@ def class_edit(session_id):
                 raise RuleError("This class already has a change waiting for instructor approval.")
             previous_start = class_row.start
             _reject_started_time_change(class_row, request.form)
+            if datetime.now() < class_row.start:
+                _reject_past_start(datetime.fromisoformat(request.form["start"]))
             proposed_instructor_id = int(request.form["instructor_id"])
             proposed_room_id = int(request.form["room_id"])
             proposed_start = datetime.fromisoformat(request.form["start"])
@@ -516,7 +554,7 @@ def class_edit(session_id):
             dropped = 0
             if class_row.start != previous_start:
                 dropped = _drop_clashing_waiters(class_row)
-                restarted = datetime.now()
+                restarted = datetime.utcnow()
                 for booking in class_row.bookings:
                     if booking.status == "Offered":
                         booking.offered_at = restarted
@@ -719,7 +757,7 @@ def respond_to_proposal(proposal_id, action):
         _keep_cancel_open(class_row, previous_start)
         if class_row.start != previous_start:
             _drop_clashing_waiters(class_row)
-            restarted = datetime.now()
+            restarted = datetime.utcnow()
             for booking in class_row.bookings:
                 if booking.status == "Offered":
                     booking.offered_at = restarted
@@ -749,3 +787,32 @@ def plans():
         return redirect(url_for("scheduling.plans"), code=303)
     return render_template("plans.html", plans=MembershipPlan.query.all(),
                            memberships=Membership.query.all())
+
+
+@bp.route("/admin/staff", methods=["GET", "POST"])
+@staff_only
+def staff_accounts():
+    if request.method == "POST":
+        from werkzeug.security import generate_password_hash
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        if not name or not email or len(password) < 6:
+            flash("Enter a name, email and password of at least 6 characters.")
+        elif User.query.filter_by(email=email).first():
+            flash("That email address is already in use.")
+        else:
+            user = User(name=name, email=email, role="staff",
+                        password_hash=generate_password_hash(password))
+            db.session.add(user)
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                flash("That email address is already in use.")
+                return redirect(url_for("scheduling.staff_accounts"), code=303)
+            flash("Staff account created for %s." % name)
+            return redirect(url_for("scheduling.staff_accounts"), code=303)
+        return redirect(url_for("scheduling.staff_accounts"), code=303)
+    staff = User.query.filter_by(role="staff").order_by(User.name).all()
+    return render_template("staff_accounts.html", staff=staff)

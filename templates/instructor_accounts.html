@@ -11,9 +11,21 @@
   </tbody>
 </table>
 
+<h2>Add a new instructor</h2>
+<form method="post" class="narrow">
+  <input type="hidden" name="action" value="add_instructor">
+  <label for="instructor_name">Instructor name</label>
+  <input id="instructor_name" name="instructor_name" type="text" required>
+  <label for="profile">Profile (optional)</label>
+  <input id="profile" name="profile" type="text">
+  <button>Add instructor</button>
+</form>
+<p class="hint">New instructors start "Not linked". Use the form below to create their login and activate them.</p>
+
 <h2>Create and link an instructor login</h2>
 {% if instructors|selectattr("user_id", "none")|list %}
 <form method="post" class="narrow">
+  <input type="hidden" name="action" value="link_account">
   <label for="instructor_id">Instructor</label>
   <select id="instructor_id" name="instructor_id" required>
     {% for i in instructors if not i.user_id %}<option value="{{ i.id }}">{{ i.name }}</option>{% endfor %}
