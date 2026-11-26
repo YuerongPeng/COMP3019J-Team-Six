@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Notifications{% endblock %}
+{% block content %}
+<h1>Notifications</h1>
+{% if notifications %}
+  <form class="mark-all" method="post" action="{{ url_for('access.mark_all_notifications_read') }}">
+    <button type="submit" class="btn ghost">Mark all as read</button>
+  </form>
+  <ul class="notices">
+    {% for n in notifications %}
+      <li class="notice{{ '' if n.read else ' unread' }}">
+        <p>{{ n.message }}</p>
+        <span class="tag">{{ n.created_at.strftime("%a %d %b %Y, %H:%M") }}</span>
+        {% if not n.read %}
+        <form method="post" action="{{ url_for('access.mark_notification_read', notification_id=n.id) }}">
+          <button type="submit" class="btn ghost">Mark read</button>
+        </form>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p class="hint">You have no notifications.</p>
+{% endif %}
+{% endblock %}

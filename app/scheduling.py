@@ -17,7 +17,7 @@ from .booking import (attendance_list, held_count, lock_member_schedule,
                       record_attendance)
 from .models import (Booking, ClassChangeProposal, ClassSession, ClassType,
                      Instructor, InstructorAbsenceRequest, Membership,
-                     MembershipPlan, Room, User)
+                     MembershipPlan, Notification, Room, User)
 
 bp = Blueprint("scheduling", __name__)
 
@@ -261,6 +261,78 @@ def _keep_cancel_open(class_row, previous_start):
     return len(booked)
 
 
+def _class_snapshot(class_row):
+    """The visible parts of a class, so a change can be described afterwards."""
+    return {
+        "instructor": class_row.instructor.name,
+        "room": class_row.room.name,
+        "class_type": class_row.class_type.name,
+        "start": class_row.start,
+        "end": class_row.end,
+    }
+
+
+def _class_change_notes(before, class_row):
+    """Human-readable list of what a schedule change altered."""
+    notes = []
+    if before["instructor"] != class_row.instructor.name:
+        notes.append("instructor is now %s" % class_row.instructor.name)
+    if before["room"] != class_row.room.name:
+        notes.append("room is now %s" % class_row.room.name)
+    if before["class_type"] != class_row.class_type.name:
+        notes.append("class is now %s" % class_row.class_type.name)
+    new_time = "%s–%s" % (class_row.start.strftime("%a %H:%M"),
+                               class_row.end.strftime("%H:%M"))
+    old_time = "%s–%s" % (before["start"].strftime("%a %H:%M"),
+                               before["end"].strftime("%H:%M"))
+    if new_time != old_time:
+        notes.append("time is now %s" % new_time)
+    return notes
+
+
+def _notify_staff(message, class_session_id=None, exclude_user_id=None):
+    """Leave one notification per staff account."""
+    staff_ids = [row[0] for row in db.session.query(User.id)
+                 .filter(User.role == "staff").all()]
+    if exclude_user_id is not None:
+        staff_ids = [i for i in staff_ids if i != exclude_user_id]
+    for user_id in staff_ids:
+        db.session.add(Notification(user_id=user_id,
+                                    class_session_id=class_session_id,
+                                    message=message))
+    return len(staff_ids)
+
+
+def _notify_class_change(class_row, notes, actor_user_id=None):
+    """Notify booked members and staff that a class change took effect.
+
+    Staff see every timetable change too, not only members. ``actor_user_id`` is
+    the staff member who made the change directly, so they are not told about
+    what they just did.
+    """
+    if not notes:
+        return 0
+    member_ids = [row[0] for row in db.session.query(Booking.user_id)
+                  .filter(Booking.class_session_id == class_row.id,
+                          Booking.status == "Booked")
+                  .distinct()]
+    staff_ids = [row[0] for row in db.session.query(User.id)
+                 .filter(User.role == "staff").all()]
+    recipients = set(member_ids) | set(staff_ids)
+    if actor_user_id is not None:
+        recipients.discard(actor_user_id)
+    if not recipients:
+        return 0
+    head = "%s on %s" % (class_row.class_type.name,
+                         class_row.start.strftime("%a %d %b %H:%M"))
+    message = "%s changed: %s." % (head, "; ".join(notes))
+    for user_id in sorted(recipients):
+        db.session.add(Notification(user_id=user_id,
+                                    class_session_id=class_row.id,
+                                    message=message))
+    return len(recipients)
+
+
 @bp.get("/admin/classes")
 @staff_only
 def class_list():
@@ -437,6 +509,7 @@ def class_edit(session_id):
                 db.session.commit()
                 flash("Change sent to %s for approval. The timetable remains unchanged until accepted." % target.name)
                 return redirect(url_for("scheduling.change_requests"), code=303)
+            before = _class_snapshot(class_row)
             _apply_class_form(class_row, request.form)
             validate_class(class_row, existing=True)
             opened = _keep_cancel_open(class_row, previous_start)
@@ -447,6 +520,9 @@ def class_edit(session_id):
                 for booking in class_row.bookings:
                     if booking.status == "Offered":
                         booking.offered_at = restarted
+            _notify_class_change(
+                class_row, _class_change_notes(before, class_row),
+                actor_user_id=current_user.id)
             db.session.commit()
             flash("Class updated on the same id.")
             if opened:
@@ -609,6 +685,12 @@ def respond_to_proposal(proposal_id, action):
     if action == "decline":
         proposal.status = "Declined"
         proposal.decided_at = datetime.utcnow()
+        _notify_staff(
+            "The change to %s on %s was declined by %s." % (
+                class_row.class_type.name,
+                class_row.start.strftime("%a %d %b %H:%M"),
+                proposal.target_instructor.name),
+            class_session_id=class_row.id)
         db.session.commit()
         flash("Change declined. The original class remains in place.")
         return redirect(url_for("scheduling.my_classes"), code=303)
@@ -622,12 +704,16 @@ def respond_to_proposal(proposal_id, action):
         previous_start = class_row.start
         if previous_start <= datetime.now() and proposal.start != previous_start:
             raise RuleError("This class has started, so its time can no longer be changed.")
+        before = _class_snapshot(class_row)
         class_row.class_type_id = proposal.class_type_id
         class_row.instructor_id = proposal.instructor_id
         class_row.room_id = proposal.room_id
         class_row.start = proposal.start
         class_row.end = proposal.end
         class_row.capacity = proposal.capacity
+        # The foreign keys above do not refresh the already-loaded relationships,
+        # so reload them before validating and describing the change.
+        db.session.expire(class_row, ["class_type", "instructor", "room"])
         validate_class(class_row, existing=True,
                        locked_member_ids=locked_member_ids)
         _keep_cancel_open(class_row, previous_start)
@@ -637,6 +723,7 @@ def respond_to_proposal(proposal_id, action):
             for booking in class_row.bookings:
                 if booking.status == "Offered":
                     booking.offered_at = restarted
+        _notify_class_change(class_row, _class_change_notes(before, class_row))
         proposal.status = "Accepted"
         proposal.decided_at = datetime.utcnow()
         for absence in InstructorAbsenceRequest.query.filter_by(

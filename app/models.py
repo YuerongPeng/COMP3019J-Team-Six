@@ -22,6 +22,7 @@ class User(db.Model, UserMixin):
 
     memberships = db.relationship("Membership", back_populates="user")
     bookings = db.relationship("Booking", back_populates="user")
+    notifications = db.relationship("Notification", back_populates="user")
 
     @property
     def is_staff(self):
@@ -216,3 +217,20 @@ class Booking(db.Model):
     user = db.relationship("User", back_populates="bookings")
     session = db.relationship("ClassSession", back_populates="bookings")
     membership = db.relationship("Membership")
+
+
+class Notification(db.Model):
+    """One message left for a member when a class they booked changes.
+
+    Written when a schedule change takes effect (instructor, room, time or class
+    type). ``read`` is cleared by the member on the Notifications page.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    class_session_id = db.Column(db.Integer, db.ForeignKey("class_session.id"), nullable=True)
+    message = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    read = db.Column(db.Boolean, nullable=False, default=False)
+
+    user = db.relationship("User", back_populates="notifications")
+    session = db.relationship("ClassSession")
