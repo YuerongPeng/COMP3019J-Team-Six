@@ -18,10 +18,12 @@
         <a href="{{ url_for('scheduling.instructor_accounts') }}">Instructor accounts</a>
         <a href="{{ url_for('scheduling.staff_accounts') }}">Staff accounts</a>
         <a href="{{ url_for('scheduling.plans') }}">Plans</a>
+        <a href="{{ url_for('access.notifications') }}">Notifications{% if unread_notifications %}<span class="badge">{{ unread_notifications }}</span>{% endif %}</a>
       {% elif current_user.role == 'instructor' %}
         <a href="{{ url_for('scheduling.my_classes') }}">My classes</a>
       {% elif current_user.role != 'instructor' %}
         <a href="{{ url_for('access.my_bookings') }}">My bookings</a>
+        <a href="{{ url_for('access.notifications') }}">Notifications{% if unread_notifications %}<span class="badge">{{ unread_notifications }}</span>{% endif %}</a>
         <a href="{{ url_for('membership.account') }}">My plan</a>
       {% endif %}
       <span class="who">{{ current_user.name }}</span>

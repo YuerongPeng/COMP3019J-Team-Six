@@ -12,7 +12,7 @@ from flask_login import current_user, login_required, login_user, logout_user
 from werkzeug.security import check_password_hash
 
 from . import db, login_manager
-from .models import Booking, ClassSession, ClassType, Membership, User
+from .models import Booking, ClassSession, ClassType, Membership, Notification, User
 
 bp = Blueprint("access", __name__)
 
@@ -167,3 +167,39 @@ def my_bookings():
         offers=offers,
         cancel_states={b.id: cancel_block(b, now) for b in upcoming},
     )
+
+
+@bp.get("/notifications")
+@login_required
+def notifications():
+    if current_user.role not in ("member", "staff"):
+        abort(403)
+    rows = (Notification.query
+            .filter_by(user_id=current_user.id)
+            .order_by(Notification.created_at.desc(), Notification.id.desc())
+            .all())
+    return render_template("notifications.html", notifications=rows)
+
+
+@bp.post("/notifications/<int:notification_id>/read")
+@login_required
+def mark_notification_read(notification_id):
+    if current_user.role not in ("member", "staff"):
+        abort(403)
+    row = db.get_or_404(Notification, notification_id)
+    if row.user_id != current_user.id:
+        abort(403)
+    row.read = True
+    db.session.commit()
+    return redirect(url_for("access.notifications"), code=303)
+
+
+@bp.post("/notifications/read-all")
+@login_required
+def mark_all_notifications_read():
+    if current_user.role not in ("member", "staff"):
+        abort(403)
+    Notification.query.filter_by(user_id=current_user.id, read=False).update(
+        {"read": True}, synchronize_session=False)
+    db.session.commit()
+    return redirect(url_for("access.notifications"), code=303)

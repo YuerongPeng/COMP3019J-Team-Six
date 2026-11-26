@@ -41,6 +41,18 @@ def _ensure_booking_columns(app):
             db.session.commit()
 
 
+def _ensure_notification_table(app):
+    """Create the notification table on databases created before the feature."""
+    with app.app_context():
+        try:
+            insp = inspect(db.engine)
+        except Exception:
+            return
+        if not insp.has_table("notification"):
+            db.create_all()
+            db.session.commit()
+
+
 def _ensure_instructor_account(app):
     """Migrate instructor links and create new workflow tables if needed."""
     with app.app_context():
@@ -128,6 +140,7 @@ def create_app(config_object="config.Config"):
     db.init_app(app)
     _ensure_booking_columns(app)
     _ensure_instructor_account(app)
+    _ensure_notification_table(app)
     _ensure_maya_pilates_skill(app)
     login_manager.init_app(app)
     login_manager.login_view = "access.login"
@@ -138,6 +151,18 @@ def create_app(config_object="config.Config"):
     app.register_blueprint(booking.bp)
     app.register_blueprint(membership.bp)
     app.register_blueprint(scheduling.bp)
+
+    @app.context_processor
+    def inject_notification_count():
+        from flask_login import current_user
+        from .models import Notification
+        unread = 0
+        if (current_user.is_authenticated
+                and getattr(current_user, "role", None) in ("member", "staff")):
+            unread = (Notification.query
+                      .filter_by(user_id=current_user.id, read=False)
+                      .count())
+        return {"unread_notifications": unread}
 
     @app.errorhandler(403)
     def forbidden(_):
